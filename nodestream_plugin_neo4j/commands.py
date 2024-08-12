@@ -32,9 +32,7 @@ class CreateAura(NodestreamCommand):
     async def handle_async(self):
         aura_client_secret = self.option("aura_client_secret")
         if not aura_client_secret:
-            self.line_error(
-                '<error>The "--aura_client_secret" option is required</error>'
-            )
+            self.line_error("<error>--aura_client_secret is required</error>")
             return
 
         name = self.argument("name")
@@ -53,23 +51,22 @@ class CreateAura(NodestreamCommand):
                 )
             )
 
-            instance_id = resp.data.id
-            username = resp.data.username
-            password = resp.data.password
+            d = resp.data
+            instance_id = d.id
+            self.line("")
             self.line(f"Instance Id = {instance_id}")
-            self.line(f"username = {username}")
-            self.line(f"password = {password}")
-            self.line('Waiting for "running" status...')
-            if resp.data.status != "running":
-                while resp.data.status != "running":
-                    sleep(10)
-                    resp = await client.instance(instance_id)
-            if resp.data.status != "running":
-                self.line_error(
-                    f'<error>Error creating instance "{instance_id}" with status "{resp.data.status}"</error>'
-                )
-                return
-            self.line("Created")
+            self.line(f"Instance name = {d.name}")
+            self.line(f"cloud_provider = {d.cloud_provider}")
+            self.line(f"region = {d.region}")
+            self.line(f"tenant_id = {d.tenant_id}")
+            self.line(f"type = {d.type}")
+            self.line(f"connection_url = {d.connection_url}")
+            self.line(f"username = {d.username}")
+            self.line(f"password = {d.password}")
+            self.line(
+                f"\nInstance created. To check on status of instance, run:\n   "
+                + f"nodestream status aura {instance_id} $AURA_CLIENT_ID --aura_client_secret=$AURA_CLIENT_SECRET"
+            )
 
 
 class StatusAura(NodestreamCommand):
@@ -77,26 +74,21 @@ class StatusAura(NodestreamCommand):
     description = "Check status of Aura instance via the Aura API"
     arguments = [
         argument("instance_id", "instance id"),
-        argument("aura_client_id", "aura api client id"),
+        argument("aura_client_id", "Aura API client id"),
     ]
-    options = [
-        # making this an option because the secret can being with a dash/hyphen, which
-        # gets interpreted as another option
-        option("aura_client_secret", "aura api client secret", flag=False)
-    ]
+    options = [option("aura_client_secret", "Aura API client secret", flag=False)]
 
     async def handle_async(self):
         aura_client_secret = self.option("aura_client_secret")
         if not aura_client_secret:
-            self.line_error(
-                '<error>The "--aura_client_secret" option is required</error>'
-            )
+            self.line_error("<error>--aura_client_secret is required</error>")
             return
 
         aura_client_id = self.argument("aura_client_id")
         async with AuraClient(aura_client_id, aura_client_secret) as client:
             resp = await client.instance(self.argument("instance_id"))
-            self.line(f"status={resp.data.status}")
+            self.line(f"Instance Name: {resp.data.name}")
+            self.line(f"Status: {resp.data.status}")
 
 
 class RemoveAura(NodestreamCommand):
@@ -115,12 +107,11 @@ class RemoveAura(NodestreamCommand):
     async def handle_async(self):
         aura_client_secret = self.option("aura_client_secret")
         if not aura_client_secret:
-            self.line_error(
-                '<error>The "--aura_client_secret" option is required</error>'
-            )
+            self.line_error("<error>--aura_client_secret is required</error>")
             return
 
         async with AuraClient(
             self.argument("aura_client_id"), aura_client_secret
         ) as client:
-            await client.delete_instance(self.argument("instance_id"))
+            resp = await client.delete_instance(self.argument("instance_id"))
+            self.line(f"{resp}")
