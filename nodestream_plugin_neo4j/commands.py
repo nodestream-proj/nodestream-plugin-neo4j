@@ -124,7 +124,7 @@ class CreateAura(AuraCommand):
             self.line("Instance is now running")
         else:
             self.line(
-                f"\nInstance is being created. To check on its status, run:\n   "
+                "\nInstance is being created. To check on its status, run:\n   "
                 + f"nodestream status aura {instance_id}"
             )
 
