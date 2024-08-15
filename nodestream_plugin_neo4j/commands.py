@@ -18,11 +18,14 @@ AURA_CLIENT_SECRET_OPTION = option(
     AURA_CLIENT_SECRET_OPT, description="Aura API client secret", flag=False
 )
 
+RUNNING_STATUS = "running"
+CREATING_STATUS = "creating"
+DESTROYING_STATUS = "destroying"
+
 
 class AuraCommand(NodestreamCommand):
-    """ Wrapper class around NodestreamCommand to handle Aura credential validation
-    """
-    
+    """Wrapper class around NodestreamCommand to handle Aura credential validation"""
+
     name = "base name"
     description = "base descrip"
     options = [AURA_CLIENT_ID_OPTION, AURA_CLIENT_SECRET_OPTION]
@@ -101,14 +104,19 @@ class CreateAura(AuraCommand):
         self.line(f"connection_url = {d.connection_url}")
         self.line(f"username = {d.username}")
         self.line(f"password = {d.password}")
+        self.line("")
 
         if self.option("wait"):
-            self.line(f"\nCreating instance...")
-            if resp.data.status != "running":
-                while resp.data.status != "running":
+            with self.spin("Waiting for instance to be ready...", ""):
+                # note: resp.data.status is None from the initial create_instance call above
+                while True:
                     sleep(10)
                     resp = await client.instance(instance_id)
-            if resp.data.status != "running":
+                    if resp.data.status != CREATING_STATUS:
+                        break
+
+            # error check
+            if resp.data.status != RUNNING_STATUS:
                 self.line_error(
                     f'<error>Error creating instance "{instance_id}" with status "{resp.data.status}"</error>'
                 )
@@ -127,7 +135,8 @@ class StatusAura(AuraCommand):
     arguments = [INSTANCE_ID_ARGUMENT]
 
     async def interact_with_aura(self, client: AuraClient):
-        resp = await client.instance(self.argument("instance_id"))
+        with self.spin("Checking status...", ""):
+            resp = await client.instance(self.argument("instance_id"))
         self.line(f"Instance Name: {resp.data.name}")
         self.line(f"Status: {resp.data.status}")
 
@@ -138,5 +147,6 @@ class RemoveAura(AuraCommand):
     arguments = [INSTANCE_ID_ARGUMENT]
 
     async def interact_with_aura(self, client: AuraClient):
-        resp = await client.delete_instance(self.argument("instance_id"))
-        self.line(f"{resp}")
+        with self.spin("Removing instance...", ""):
+            resp = await client.delete_instance(self.argument("instance_id"))
+            self.line(f"{resp}")
