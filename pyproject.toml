@@ -10,6 +10,7 @@ python = "^3.10"
 neo4j = "^5.16.0"
 nodestream = "^0.13.0"
 cymple = "^0.11.0"
+neo4j-aura-sdk = "^0.1.1"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.12.1"
@@ -38,3 +39,4 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.plugins."nodestream.plugins"]
 "databases" = "nodestream_plugin_neo4j"
+commands = "nodestream_plugin_neo4j.commands"
