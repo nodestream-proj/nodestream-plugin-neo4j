@@ -1,3 +1,4 @@
+import asyncio
 from logging import getLogger
 from typing import Awaitable, Iterable, Tuple, Union
 
@@ -5,14 +6,13 @@ from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession, Record, Routing
 from neo4j.auth_management import AsyncAuthManagers
 from neo4j.exceptions import (
     AuthError,
-    TransientError,
     ServiceUnavailable,
     SessionExpired,
+    TransientError,
 )
 from nodestream.file_io import LazyLoadedArgument
 
 from .query import Query
-
 
 RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
 
@@ -52,21 +52,27 @@ class Neo4jDatabaseConnection:
         password: Union[str, LazyLoadedArgument],
         database_name: str = "neo4j",
         max_retry_attempts: int = 3,
+        retry_factor: int = 1,
         **driver_kwargs,
     ):
         def driver_factory():
             auth = AsyncAuthManagers.basic(auth_provider_factory(username, password))
             return AsyncGraphDatabase.driver(uri, auth=auth, **driver_kwargs)
 
-        return cls(driver_factory, database_name, max_retry_attempts)
+        return cls(driver_factory, database_name, max_retry_attempts, retry_factor)
 
     def __init__(
-        self, driver_factory, database_name: str, max_retry_attempts: int
+        self,
+        driver_factory,
+        database_name: str,
+        max_retry_attempts: int = 3,
+        retry_factor: float = 1,
     ) -> None:
         self.driver_factory = driver_factory
         self.database_name = database_name
         self.logger = getLogger(self.__class__.__name__)
         self.max_retry_attempts = max_retry_attempts
+        self.retry_factor = retry_factor
         self._driver = None
 
     def acquire_driver(self) -> AsyncDriver:
@@ -97,7 +103,10 @@ class Neo4jDatabaseConnection:
         )
 
     async def _execute_query(
-        self, query: Query, log_result: bool = False, routing_=RoutingControl.WRITE
+        self,
+        query: Query,
+        log_result: bool = False,
+        routing_=RoutingControl.WRITE,
     ) -> Record:
         result = await self.driver.execute_query(
             query.query_statement,
@@ -113,7 +122,10 @@ class Neo4jDatabaseConnection:
         return records
 
     async def execute(
-        self, query: Query, log_result: bool = False, routing_=RoutingControl.WRITE
+        self,
+        query: Query,
+        log_result: bool = False,
+        routing_=RoutingControl.WRITE,
     ) -> Iterable[Record]:
         self.log_query_start(query)
         attempts = 0
@@ -126,7 +138,7 @@ class Neo4jDatabaseConnection:
                     f"Error executing query, retrying. Attempt {attempts + 1}",
                     exc_info=e,
                 )
+                await asyncio.sleep(self.retry_factor * attempts)
                 self.acquire_driver()
                 if attempts >= self.max_retry_attempts:
-                    message = f"Failed to execute after {self.max_retry_attempts} tries"
-                    raise Exception(message) from e
+                    raise e
