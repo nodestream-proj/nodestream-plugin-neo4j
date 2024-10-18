@@ -84,9 +84,6 @@ class Neo4jDatabaseConnection:
             self.acquire_driver()
         return self._driver
 
-    def session(self) -> AsyncSession:
-        return self.driver.session(database=self.database_name)
-
     def log_query_start(self, query: Query):
         self.logger.info(
             "Executing Cypher Query to Neo4j",
@@ -142,3 +139,6 @@ class Neo4jDatabaseConnection:
                 self.acquire_driver()
                 if attempts >= self.max_retry_attempts:
                     raise e
+
+    def session(self) -> AsyncSession:
+        return self.driver.session(database=self.database_name)
