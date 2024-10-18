@@ -12,7 +12,7 @@ from nodestream_plugin_neo4j.query import Query
 
 @pytest.fixture
 def database_connection(mocker):
-    return Neo4jDatabaseConnection(mocker.AsyncMock(AsyncDriver), "neo4j")
+    return Neo4jDatabaseConnection(mocker.AsyncMock(AsyncDriver), "neo4j", 3)
 
 
 @pytest.mark.asyncio

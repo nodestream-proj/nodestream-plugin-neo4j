@@ -3,9 +3,18 @@ from typing import Awaitable, Iterable, Tuple, Union
 
 from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession, Record, RoutingControl
 from neo4j.auth_management import AsyncAuthManagers
+from neo4j.exceptions import (
+    AuthError,
+    TransientError,
+    ServiceUnavailable,
+    SessionExpired,
+)
 from nodestream.file_io import LazyLoadedArgument
 
 from .query import Query
+
+
+RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
 
 
 def auth_provider_factory(
@@ -42,20 +51,37 @@ class Neo4jDatabaseConnection:
         username: Union[str, LazyLoadedArgument],
         password: Union[str, LazyLoadedArgument],
         database_name: str = "neo4j",
-        **driver_kwargs
+        max_retry_attempts: int = 3,
+        **driver_kwargs,
     ):
-        auth = AsyncAuthManagers.basic(auth_provider_factory(username, password))
-        driver = AsyncGraphDatabase.driver(uri, auth=auth, **driver_kwargs)
-        return cls(driver, database_name)
+        def driver_factory():
+            auth = AsyncAuthManagers.basic(auth_provider_factory(username, password))
+            return AsyncGraphDatabase.driver(uri, auth=auth, **driver_kwargs)
 
-    def __init__(self, driver: AsyncDriver, database_name: str) -> None:
-        self.driver = driver
+        return cls(driver_factory, database_name, max_retry_attempts)
+
+    def __init__(
+        self, driver_factory, database_name: str, max_retry_attempts: int
+    ) -> None:
+        self.driver_factory = driver_factory
         self.database_name = database_name
         self.logger = getLogger(self.__class__.__name__)
+        self.max_retry_attempts = max_retry_attempts
+        self._driver = None
 
-    async def execute(
-        self, query: Query, log_result: bool = False, routing_=RoutingControl.WRITE
-    ) -> Iterable[Record]:
+    def acquire_driver(self) -> AsyncDriver:
+        self._driver = self.driver_factory()
+
+    @property
+    def driver(self):
+        if self._driver is None:
+            self.acquire_driver()
+        return self._driver
+
+    def session(self) -> AsyncSession:
+        return self.driver.session(database=self.database_name)
+
+    def log_query_start(self, query: Query):
         self.logger.info(
             "Executing Cypher Query to Neo4j",
             extra={
@@ -64,23 +90,43 @@ class Neo4jDatabaseConnection:
             },
         )
 
+    def log_record(self, record: Record):
+        self.logger.info(
+            "Gathered Query Results",
+            extra=dict(**record, uri=self.driver._pool.address.host),
+        )
+
+    async def _execute_query(
+        self, query: Query, log_result: bool = False, routing_=RoutingControl.WRITE
+    ) -> Record:
         result = await self.driver.execute_query(
             query.query_statement,
             query.parameters,
             database_=self.database_name,
             routing_=routing_,
         )
+        records = result.records
         if log_result:
-            for record in result.records:
-                self.logger.info(
-                    "Gathered Query Results",
-                    extra=dict(
-                        **record,
-                        query=query.query_statement,
-                        uri=self.driver._pool.address.host
-                    ),
-                )
-        return result.records
+            for record in records:
+                self.log_record(record)
 
-    def session(self) -> AsyncSession:
-        return self.driver.session(database=self.database_name)
+        return records
+
+    async def execute(
+        self, query: Query, log_result: bool = False, routing_=RoutingControl.WRITE
+    ) -> Iterable[Record]:
+        self.log_query_start(query)
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                return await self._execute_query(query, log_result, routing_)
+            except RETRYABLE_EXCEPTIONS as e:
+                self.logger.warning(
+                    f"Error executing query, retrying. Attempt {attempts + 1}",
+                    exc_info=e,
+                )
+                self.acquire_driver()
+                if attempts >= self.max_retry_attempts:
+                    message = f"Failed to execute after {self.max_retry_attempts} tries"
+                    raise Exception(message) from e
