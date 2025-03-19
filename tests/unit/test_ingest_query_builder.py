@@ -27,7 +27,7 @@ from nodestream_plugin_neo4j.query import COMMIT_QUERY, Query, QueryBatch
 
 @pytest.fixture
 def query_builder():
-    return Neo4jIngestQueryBuilder(True)
+    return Neo4jIngestQueryBuilder(True, False)
 
 
 GREATEST_DAY = Timestamp(1998, 3, 25, 2, 0, 1)
@@ -177,6 +177,16 @@ SIMPLE_NODE_EXPECTED_QUERY = QueryBatch(
         }
     ],
 )
+SIMPLE_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP = QueryBatch(
+    "MERGE (node: TestType {id : params.__node_id}) ON CREATE SET node.first_ingested_at = datetime() SET node += params.__node_properties",
+    [
+        {
+            "__node_id": "foo",
+            "__node_properties": SIMPLE_NODE.properties,
+            "__node_additional_labels": (),
+        }
+    ],
+)
 
 SIMPLE_NODE_EXPECTED_QUERY_ON_MATCH = QueryBatch(
     "MATCH (node: TestType) WHERE node.id = params.__node_id SET node += params.__node_properties",
@@ -207,6 +217,17 @@ COMPLEX_NODE_EXPECTED_QUERY = QueryBatch(
     ],
 )
 
+COMPLEX_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP = QueryBatch(
+    "MERGE (node: ComplexType {id : params.__node_id}) ON CREATE SET node.first_ingested_at = datetime() WITH node, params CALL apoc.create.addLabels(node, params.__node_additional_labels) yield node as _ SET node += params.__node_properties",
+    [
+        {
+            "__node_id": "foo",
+            "__node_properties": COMPLEX_NODE.properties,
+            "__node_additional_labels": ("ExtraTypeOne", "ExtraTypeTwo"),
+        }
+    ],
+)
+
 COMPLEX_NODE_TWO = Node(
     "ComplexType",
     {"id_part1": "foo", "id_part2": "bar"},
@@ -215,6 +236,18 @@ COMPLEX_NODE_TWO = Node(
 
 COMPLEX_NODE_TWO_EXPECTED_QUERY = QueryBatch(
     "MERGE (node: ComplexType {id_part1 : params.__node_id_part1, id_part2 : params.__node_id_part2}) WITH node, params CALL apoc.create.addLabels(node, params.__node_additional_labels) yield node as _ SET node += params.__node_properties",
+    [
+        {
+            "__node_id_part1": "foo",
+            "__node_id_part2": "bar",
+            "__node_properties": COMPLEX_NODE_TWO.properties,
+            "__node_additional_labels": ("ExtraTypeOne", "ExtraTypeTwo"),
+        }
+    ],
+)
+
+COMPLEX_NODE_TWO_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP = QueryBatch(
+    "MERGE (node: ComplexType {id_part1 : params.__node_id_part1, id_part2 : params.__node_id_part2}) ON CREATE SET node.first_ingested_at = datetime() WITH node, params CALL apoc.create.addLabels(node, params.__node_additional_labels) yield node as _ SET node += params.__node_properties",
     [
         {
             "__node_id_part1": "foo",
@@ -238,6 +271,24 @@ COMPLEX_NODE_TWO_EXPECTED_QUERY = QueryBatch(
 def test_node_update_generates_expected_queries(
     query_builder, node, expected_query, node_creation_rule
 ):
+    operation = OperationOnNodeIdentity(node.identity_shape, node_creation_rule)
+    query = query_builder.generate_batch_update_node_operation_batch(operation, [node])
+    assert_that(query, equal_to(expected_query))
+
+
+@pytest.mark.parametrize(
+    "node,expected_query,node_creation_rule",
+    [
+        [SIMPLE_NODE, SIMPLE_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP, NodeCreationRule.EAGER],
+        [COMPLEX_NODE, COMPLEX_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP, NodeCreationRule.EAGER],
+        [COMPLEX_NODE_TWO, COMPLEX_NODE_TWO_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP, NodeCreationRule.EAGER],
+        [SIMPLE_NODE, SIMPLE_NODE_EXPECTED_QUERY_ON_MATCH, NodeCreationRule.MATCH_ONLY],
+    ],
+)
+def test_node_update_with_created_timestamp_generates_exepected_queries(
+    query_builder, node, expected_query, node_creation_rule
+):
+    query_builder.set_first_ingested_at = True
     operation = OperationOnNodeIdentity(node.identity_shape, node_creation_rule)
     query = query_builder.generate_batch_update_node_operation_batch(operation, [node])
     assert_that(query, equal_to(expected_query))

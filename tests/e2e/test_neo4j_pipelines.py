@@ -19,6 +19,41 @@ def project():
     return Project.read_from_file(Path("tests/e2e/project/nodestream.yaml"))
 
 
+def validate_timestamps(session):
+    nodes_with_first_ingested_at = session.run(
+        """
+        MATCH (n) where n.first_ingested_at IS NOT NULL
+        RETURN count(n) AS count
+        """
+    )
+
+    total_nodes = session.run(
+        """
+        MATCH (n)
+        RETURN count(n) AS count
+        """
+    )
+
+    assert nodes_with_first_ingested_at.single()["count"] == total_nodes.single()["count"]
+
+    # Check that all relationships have a last_ingested_at property
+    relationships_with_last_ingested_at = session.run(
+        """
+        MATCH ()-[r]->() where r.last_ingested_at IS NOT NULL
+        RETURN count(r) AS count
+        """
+    )
+
+    total_relationships = session.run(
+        """
+        MATCH ()-[r]->()
+        RETURN count(r) AS count
+        """
+    )
+
+    assert relationships_with_last_ingested_at.single()["count"] == total_relationships.single()["count"]
+
+
 def validate_airports(session):
     result = session.run(
         """
@@ -125,8 +160,9 @@ def validate_ttl_seperation_between_node_object_types(session):
 
 
 PIPELINE_TESTS = [
-    ("airports", [validate_airports, valiudate_airport_country]),
-    ("fifa", [validate_fifa_player_count, validate_fifa_mo_club]),
+    ("airports", [validate_airports, valiudate_airport_country], "my-neo4j-db"),
+    ("fifa", [validate_fifa_player_count, validate_fifa_mo_club], "my-neo4j-db"),
+    ("airpoints", [validate_airports, valiudate_airport_country, validate_timestamps], "my-creation-ts-db"),
 ]
 
 TTL_TESTS = [
@@ -280,16 +316,16 @@ def create_test_objects(session: Session):
 @pytest.mark.e2e
 @pytest.mark.parametrize("neo4j_version", TESTED_NEO4J_VERSIONS)
 @pytest.mark.parametrize(
-    "pipeline_name,validations",
+    "pipeline_name,validations,target_name",
     PIPELINE_TESTS,
 )
 async def test_neo4j_pipeline(
-    project, neo4j_container, pipeline_name, validations, neo4j_version
+    project, neo4j_container, pipeline_name, validations, neo4j_version, target_name
 ):
     with neo4j_container(
         neo4j_version
     ) as neo4j_container, neo4j_container.get_driver() as driver, driver.session() as session:
-        target = project.get_target_by_name("my-neo4j-db")
+        target = project.get_target_by_name(target_name)
 
         await project.run(
             RunRequest(

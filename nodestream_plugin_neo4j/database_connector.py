@@ -25,6 +25,7 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         chunk_size: int = 1000,
         execute_chunks_in_parallel: bool = True,
         retries_per_chunk: int = 3,
+        _experimental_set_first_ingested_at: bool = False,
         **connection_args
     ):
         database_connection = Neo4jDatabaseConnection.from_configuration(
@@ -37,6 +38,7 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
             chunk_size=chunk_size,
             execute_chunks_in_parallel=execute_chunks_in_parallel,
             retries_per_chunk=retries_per_chunk,
+            set_first_ingested_at=_experimental_set_first_ingested_at,
         )
 
     def __init__(
@@ -47,6 +49,7 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         chunk_size: int = 1000,
         execute_chunks_in_parallel: bool = True,
         retries_per_chunk: int = 3,
+        set_first_ingested_at: bool = False,
     ) -> None:
         self.use_enterprise_features = use_enterprise_features
         self.use_apoc = use_apoc
@@ -54,9 +57,10 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         self.chunk_size = chunk_size
         self.execute_chunks_in_parallel = execute_chunks_in_parallel
         self.retries_per_chunk = retries_per_chunk
+        self.set_first_ingested_at = set_first_ingested_at
 
     def make_query_executor(self) -> QueryExecutor:
-        query_builder = Neo4jIngestQueryBuilder(self.use_apoc)
+        query_builder = Neo4jIngestQueryBuilder(self.use_apoc, self.set_first_ingested_at)
         return Neo4jQueryExecutor(
             self.database_connection,
             query_builder,
