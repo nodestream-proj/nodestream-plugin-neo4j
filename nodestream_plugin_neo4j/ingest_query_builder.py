@@ -117,7 +117,7 @@ def _make_relationship(
         return f"{create_rel_query} {set_properties_query}"
 
     if set_first_ingested_at:
-        merge_rel_query = f"{merge_rel_query} ON CREATE SET {RELATIONSHIP_REF_NAME}.first_ingested_at = datetime()"
+        merge_rel_query = f"{merge_rel_query} ON CREATE SET {RELATIONSHIP_REF_NAME}.first_ingested_at = params.{generate_prefixed_param_name(PROPERTIES_PARAM_NAME, RELATIONSHIP_REF_NAME)}['last_ingested_at']"
 
     return f"{merge_rel_query} {set_properties_query}"
 
@@ -142,7 +142,7 @@ class Neo4jIngestQueryBuilder:
             # property  and we are in the merge case. Because MATCH will not
             # create the node.
             if self.set_first_ingested_at:
-                query = f"{query} ON CREATE SET {GENERIC_NODE_REF_NAME}.first_ingested_at = datetime()"
+                query = f"{query} ON CREATE SET {GENERIC_NODE_REF_NAME}.first_ingested_at = params.{generate_prefixed_param_name(PROPERTIES_PARAM_NAME, GENERIC_NODE_REF_NAME)}['last_ingested_at']"
         else:
             query = str(_match_node(operation))
 

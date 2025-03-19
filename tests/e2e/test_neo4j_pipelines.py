@@ -20,6 +20,7 @@ def project():
 
 
 def validate_timestamps(session):
+    # Check that all nodes have a first_ingested_at property
     nodes_with_first_ingested_at = session.run(
         """
         MATCH (n) where n.first_ingested_at IS NOT NULL

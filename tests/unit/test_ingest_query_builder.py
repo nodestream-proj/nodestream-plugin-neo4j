@@ -178,7 +178,7 @@ SIMPLE_NODE_EXPECTED_QUERY = QueryBatch(
     ],
 )
 SIMPLE_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP = QueryBatch(
-    "MERGE (node: TestType {id : params.__node_id}) ON CREATE SET node.first_ingested_at = datetime() SET node += params.__node_properties",
+    "MERGE (node: TestType {id : params.__node_id}) ON CREATE SET node.first_ingested_at = params.__node_properties['last_ingested_at'] SET node += params.__node_properties",
     [
         {
             "__node_id": "foo",
@@ -218,7 +218,7 @@ COMPLEX_NODE_EXPECTED_QUERY = QueryBatch(
 )
 
 COMPLEX_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP = QueryBatch(
-    "MERGE (node: ComplexType {id : params.__node_id}) ON CREATE SET node.first_ingested_at = datetime() WITH node, params CALL apoc.create.addLabels(node, params.__node_additional_labels) yield node as _ SET node += params.__node_properties",
+    "MERGE (node: ComplexType {id : params.__node_id}) ON CREATE SET node.first_ingested_at = params.__node_properties['last_ingested_at'] WITH node, params CALL apoc.create.addLabels(node, params.__node_additional_labels) yield node as _ SET node += params.__node_properties",
     [
         {
             "__node_id": "foo",
@@ -247,7 +247,7 @@ COMPLEX_NODE_TWO_EXPECTED_QUERY = QueryBatch(
 )
 
 COMPLEX_NODE_TWO_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP = QueryBatch(
-    "MERGE (node: ComplexType {id_part1 : params.__node_id_part1, id_part2 : params.__node_id_part2}) ON CREATE SET node.first_ingested_at = datetime() WITH node, params CALL apoc.create.addLabels(node, params.__node_additional_labels) yield node as _ SET node += params.__node_properties",
+    "MERGE (node: ComplexType {id_part1 : params.__node_id_part1, id_part2 : params.__node_id_part2}) ON CREATE SET node.first_ingested_at = params.__node_properties['last_ingested_at'] WITH node, params CALL apoc.create.addLabels(node, params.__node_additional_labels) yield node as _ SET node += params.__node_properties",
     [
         {
             "__node_id_part1": "foo",
@@ -315,6 +315,19 @@ RELATIONSHIP_BETWEEN_TWO_NODES = RelationshipWithNodes(
 RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY = QueryBatch(
     """MATCH (from_node: TestType) WHERE from_node.id = params.__from_node_id MATCH (to_node: ComplexType) WHERE to_node.id = params.__to_node_id
     MERGE (from_node)-[rel: RELATED_TO]->(to_node) SET rel += params.__rel_properties
+    """,
+    [
+        {
+            "__from_node_id": "foo",
+            "__to_node_id": "foo",
+            "__rel_properties": RELATIONSHIP_BETWEEN_TWO_NODES.relationship.properties,
+        }
+    ],
+)
+
+RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP = QueryBatch(
+    """MATCH (from_node: TestType) WHERE from_node.id = params.__from_node_id MATCH (to_node: ComplexType) WHERE to_node.id = params.__to_node_id
+    MERGE (from_node)-[rel: RELATED_TO]->(to_node) ON CREATE SET rel.first_ingested_at = params.__rel_properties['last_ingested_at'] SET rel += params.__rel_properties
     """,
     [
         {
