@@ -60,7 +60,9 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         self.set_first_ingested_at = set_first_ingested_at
 
     def make_query_executor(self) -> QueryExecutor:
-        query_builder = Neo4jIngestQueryBuilder(self.use_apoc, self.set_first_ingested_at)
+        query_builder = Neo4jIngestQueryBuilder(
+            self.use_apoc, self.set_first_ingested_at
+        )
         return Neo4jQueryExecutor(
             self.database_connection,
             query_builder,

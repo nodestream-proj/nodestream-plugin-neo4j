@@ -279,9 +279,21 @@ def test_node_update_generates_expected_queries(
 @pytest.mark.parametrize(
     "node,expected_query,node_creation_rule",
     [
-        [SIMPLE_NODE, SIMPLE_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP, NodeCreationRule.EAGER],
-        [COMPLEX_NODE, COMPLEX_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP, NodeCreationRule.EAGER],
-        [COMPLEX_NODE_TWO, COMPLEX_NODE_TWO_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP, NodeCreationRule.EAGER],
+        [
+            SIMPLE_NODE,
+            SIMPLE_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP,
+            NodeCreationRule.EAGER,
+        ],
+        [
+            COMPLEX_NODE,
+            COMPLEX_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP,
+            NodeCreationRule.EAGER,
+        ],
+        [
+            COMPLEX_NODE_TWO,
+            COMPLEX_NODE_TWO_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP,
+            NodeCreationRule.EAGER,
+        ],
         [SIMPLE_NODE, SIMPLE_NODE_EXPECTED_QUERY_ON_MATCH, NodeCreationRule.MATCH_ONLY],
     ],
 )

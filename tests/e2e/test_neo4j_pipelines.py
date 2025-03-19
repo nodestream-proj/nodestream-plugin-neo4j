@@ -34,7 +34,9 @@ def validate_timestamps(session):
         """
     )
 
-    assert nodes_with_first_ingested_at.single()["count"] == total_nodes.single()["count"]
+    assert (
+        nodes_with_first_ingested_at.single()["count"] == total_nodes.single()["count"]
+    )
 
     # Check that all relationships have a last_ingested_at property
     relationships_with_last_ingested_at = session.run(
@@ -51,7 +53,10 @@ def validate_timestamps(session):
         """
     )
 
-    assert relationships_with_last_ingested_at.single()["count"] == total_relationships.single()["count"]
+    assert (
+        relationships_with_last_ingested_at.single()["count"]
+        == total_relationships.single()["count"]
+    )
 
 
 def validate_airports(session):
@@ -162,7 +167,11 @@ def validate_ttl_seperation_between_node_object_types(session):
 PIPELINE_TESTS = [
     ("airports", [validate_airports, valiudate_airport_country], "my-neo4j-db"),
     ("fifa", [validate_fifa_player_count, validate_fifa_mo_club], "my-neo4j-db"),
-    ("airpoints", [validate_airports, valiudate_airport_country, validate_timestamps], "my-creation-ts-db"),
+    (
+        "airpoints",
+        [validate_airports, valiudate_airport_country, validate_timestamps],
+        "my-creation-ts-db",
+    ),
 ]
 
 TTL_TESTS = [
