@@ -406,7 +406,6 @@ RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY_AND_CREATE_AND_TIME
 )
 
 
-
 @pytest.mark.parametrize(
     "rel,expected_query",
     [
@@ -456,8 +455,7 @@ def test_relationship_update_generates_expected_queries(
         [
             RELATIONSHIP_BETWEEN_TWO_NODES_WITH_MULTI_KEY,
             RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY_AND_TIMESTAMP,
-        ]
-        ,
+        ],
         [
             RELATIONSHIP_BETWEEN_TWO_NODES_WITH_MULTI_KEY_AND_CREATE,
             RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY_AND_CREATE_AND_TIMESTAMP,
