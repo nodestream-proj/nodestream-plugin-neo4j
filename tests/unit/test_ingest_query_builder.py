@@ -394,7 +394,7 @@ RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY_AND_CREATE = QueryB
 
 RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY_AND_CREATE_AND_TIMESTAMP = QueryBatch(
     """MATCH (from_node: TestType) WHERE from_node.id = params.__from_node_id MATCH (to_node: ComplexType) WHERE to_node.id_part1 = params.__to_node_id_part1 AND to_node.id_part2 = params.__to_node_id_part2
-    CREATE (from_node)-[rel: RELATED_TO]->(to_node) ON CREATE SET rel.first_ingested_at = params.__rel_properties['last_ingested_at']  SET rel += params.__rel_properties""",
+    CREATE (from_node)-[rel: RELATED_TO]->(to_node) SET rel += params.__rel_properties SET rel.first_ingested_at = params.__rel_properties['last_ingested_at']""",
     [
         {
             "__from_node_id": "foo",

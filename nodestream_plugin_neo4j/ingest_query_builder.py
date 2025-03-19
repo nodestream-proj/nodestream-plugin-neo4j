@@ -114,6 +114,8 @@ def _make_relationship(
     set_properties_query = f"SET {RELATIONSHIP_REF_NAME} += params.{generate_prefixed_param_name(PROPERTIES_PARAM_NAME, RELATIONSHIP_REF_NAME)}"
     if creation_rule == RelationshipCreationRule.CREATE:
         create_rel_query = str(merge_rel_query).replace("MERGE", "CREATE")
+        if set_first_ingested_at:
+            set_properties_query = f"{set_properties_query} SET {RELATIONSHIP_REF_NAME}.first_ingested_at = params.{generate_prefixed_param_name(PROPERTIES_PARAM_NAME, RELATIONSHIP_REF_NAME)}['last_ingested_at']"
         return f"{create_rel_query} {set_properties_query}"
 
     if set_first_ingested_at:
