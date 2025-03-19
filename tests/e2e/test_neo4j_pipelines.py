@@ -169,7 +169,7 @@ PIPELINE_TESTS = [
     ("airports", [validate_airports, valiudate_airport_country], "my-neo4j-db"),
     ("fifa", [validate_fifa_player_count, validate_fifa_mo_club], "my-neo4j-db"),
     (
-        "airpoints",
+        "airports",
         [validate_airports, valiudate_airport_country, validate_timestamps],
         "my-creation-ts-db",
     ),
