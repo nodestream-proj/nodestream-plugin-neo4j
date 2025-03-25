@@ -1,15 +1,15 @@
 [tool.poetry]
 name = "nodestream-plugin-neo4j"
-version = "0.14.1"
+version = "0.14.2b1"
 description = ""
 authors = ["Zach Probst <Zach_Probst@intuit.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-neo4j = "^5.16.0"
 nodestream = "^0.14.0"
 cymple = "^0.11.0"
+neo4j-rust-ext = "^5.28.1.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.12.1"
