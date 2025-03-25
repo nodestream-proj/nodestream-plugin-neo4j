@@ -94,7 +94,9 @@ def _merge_node(
 
 @cache
 def _make_relationship(
-    rel_identity: RelationshipIdentityShape, creation_rule: RelationshipCreationRule
+    rel_identity: RelationshipIdentityShape,
+    creation_rule: RelationshipCreationRule,
+    set_first_ingested_at: bool,
 ):
     keys = generate_properties_set_with_prefix(rel_identity.keys, RELATIONSHIP_REF_NAME)
     merge_rel_query = (
@@ -112,14 +114,20 @@ def _make_relationship(
     set_properties_query = f"SET {RELATIONSHIP_REF_NAME} += params.{generate_prefixed_param_name(PROPERTIES_PARAM_NAME, RELATIONSHIP_REF_NAME)}"
     if creation_rule == RelationshipCreationRule.CREATE:
         create_rel_query = str(merge_rel_query).replace("MERGE", "CREATE")
+        if set_first_ingested_at:
+            set_properties_query = f"{set_properties_query} SET {RELATIONSHIP_REF_NAME}.first_ingested_at = params.{generate_prefixed_param_name(PROPERTIES_PARAM_NAME, RELATIONSHIP_REF_NAME)}['last_ingested_at']"
         return f"{create_rel_query} {set_properties_query}"
+
+    if set_first_ingested_at:
+        merge_rel_query = f"{merge_rel_query} ON CREATE SET {RELATIONSHIP_REF_NAME}.first_ingested_at = params.{generate_prefixed_param_name(PROPERTIES_PARAM_NAME, RELATIONSHIP_REF_NAME)}['last_ingested_at']"
 
     return f"{merge_rel_query} {set_properties_query}"
 
 
 class Neo4jIngestQueryBuilder:
-    def __init__(self, apoc_iterate: bool):
+    def __init__(self, apoc_iterate: bool, set_first_ingested_at: bool):
         self.apoc_iterate = apoc_iterate
+        self.set_first_ingested_at = set_first_ingested_at
 
     @cache
     @correct_parameters
@@ -131,6 +139,12 @@ class Neo4jIngestQueryBuilder:
 
         if operation.node_creation_rule == NodeCreationRule.EAGER:
             query = str(_merge_node(operation))
+
+            # We only need to add this if the user wants a first_ingested_at
+            # property  and we are in the merge case. Because MATCH will not
+            # create the node.
+            if self.set_first_ingested_at:
+                query = f"{query} ON CREATE SET {GENERIC_NODE_REF_NAME}.first_ingested_at = params.{generate_prefixed_param_name(PROPERTIES_PARAM_NAME, GENERIC_NODE_REF_NAME)}['last_ingested_at']"
         else:
             query = str(_match_node(operation))
 
@@ -173,7 +187,9 @@ class Neo4jIngestQueryBuilder:
         match_from_node_segment = _match_node(operation.from_node, FROM_NODE_REF_NAME)
         match_to_node_segment = _match_node(operation.to_node, TO_NODE_REF_NAME)
         merge_rel_segment = _make_relationship(
-            operation.relationship_identity, operation.relationship_creation_rule
+            operation.relationship_identity,
+            operation.relationship_creation_rule,
+            self.set_first_ingested_at,
         )
         return f"{match_from_node_segment} {match_to_node_segment} {merge_rel_segment}"
 

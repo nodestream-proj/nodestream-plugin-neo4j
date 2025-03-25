@@ -27,7 +27,7 @@ from nodestream_plugin_neo4j.query import COMMIT_QUERY, Query, QueryBatch
 
 @pytest.fixture
 def query_builder():
-    return Neo4jIngestQueryBuilder(True)
+    return Neo4jIngestQueryBuilder(True, False)
 
 
 GREATEST_DAY = Timestamp(1998, 3, 25, 2, 0, 1)
@@ -177,6 +177,16 @@ SIMPLE_NODE_EXPECTED_QUERY = QueryBatch(
         }
     ],
 )
+SIMPLE_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP = QueryBatch(
+    "MERGE (node: TestType {id : params.__node_id}) ON CREATE SET node.first_ingested_at = params.__node_properties['last_ingested_at'] SET node += params.__node_properties",
+    [
+        {
+            "__node_id": "foo",
+            "__node_properties": SIMPLE_NODE.properties,
+            "__node_additional_labels": (),
+        }
+    ],
+)
 
 SIMPLE_NODE_EXPECTED_QUERY_ON_MATCH = QueryBatch(
     "MATCH (node: TestType) WHERE node.id = params.__node_id SET node += params.__node_properties",
@@ -207,6 +217,17 @@ COMPLEX_NODE_EXPECTED_QUERY = QueryBatch(
     ],
 )
 
+COMPLEX_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP = QueryBatch(
+    "MERGE (node: ComplexType {id : params.__node_id}) ON CREATE SET node.first_ingested_at = params.__node_properties['last_ingested_at'] WITH node, params CALL apoc.create.addLabels(node, params.__node_additional_labels) yield node as _ SET node += params.__node_properties",
+    [
+        {
+            "__node_id": "foo",
+            "__node_properties": COMPLEX_NODE.properties,
+            "__node_additional_labels": ("ExtraTypeOne", "ExtraTypeTwo"),
+        }
+    ],
+)
+
 COMPLEX_NODE_TWO = Node(
     "ComplexType",
     {"id_part1": "foo", "id_part2": "bar"},
@@ -215,6 +236,18 @@ COMPLEX_NODE_TWO = Node(
 
 COMPLEX_NODE_TWO_EXPECTED_QUERY = QueryBatch(
     "MERGE (node: ComplexType {id_part1 : params.__node_id_part1, id_part2 : params.__node_id_part2}) WITH node, params CALL apoc.create.addLabels(node, params.__node_additional_labels) yield node as _ SET node += params.__node_properties",
+    [
+        {
+            "__node_id_part1": "foo",
+            "__node_id_part2": "bar",
+            "__node_properties": COMPLEX_NODE_TWO.properties,
+            "__node_additional_labels": ("ExtraTypeOne", "ExtraTypeTwo"),
+        }
+    ],
+)
+
+COMPLEX_NODE_TWO_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP = QueryBatch(
+    "MERGE (node: ComplexType {id_part1 : params.__node_id_part1, id_part2 : params.__node_id_part2}) ON CREATE SET node.first_ingested_at = params.__node_properties['last_ingested_at'] WITH node, params CALL apoc.create.addLabels(node, params.__node_additional_labels) yield node as _ SET node += params.__node_properties",
     [
         {
             "__node_id_part1": "foo",
@@ -243,6 +276,36 @@ def test_node_update_generates_expected_queries(
     assert_that(query, equal_to(expected_query))
 
 
+@pytest.mark.parametrize(
+    "node,expected_query,node_creation_rule",
+    [
+        [
+            SIMPLE_NODE,
+            SIMPLE_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP,
+            NodeCreationRule.EAGER,
+        ],
+        [
+            COMPLEX_NODE,
+            COMPLEX_NODE_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP,
+            NodeCreationRule.EAGER,
+        ],
+        [
+            COMPLEX_NODE_TWO,
+            COMPLEX_NODE_TWO_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP,
+            NodeCreationRule.EAGER,
+        ],
+        [SIMPLE_NODE, SIMPLE_NODE_EXPECTED_QUERY_ON_MATCH, NodeCreationRule.MATCH_ONLY],
+    ],
+)
+def test_node_update_with_created_timestamp_generates_exepected_queries(
+    query_builder, node, expected_query, node_creation_rule
+):
+    query_builder.set_first_ingested_at = True
+    operation = OperationOnNodeIdentity(node.identity_shape, node_creation_rule)
+    query = query_builder.generate_batch_update_node_operation_batch(operation, [node])
+    assert_that(query, equal_to(expected_query))
+
+
 RELATIONSHIP_BETWEEN_TWO_NODES = RelationshipWithNodes(
     from_node=SIMPLE_NODE,
     to_node=COMPLEX_NODE,
@@ -252,6 +315,19 @@ RELATIONSHIP_BETWEEN_TWO_NODES = RelationshipWithNodes(
 RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY = QueryBatch(
     """MATCH (from_node: TestType) WHERE from_node.id = params.__from_node_id MATCH (to_node: ComplexType) WHERE to_node.id = params.__to_node_id
     MERGE (from_node)-[rel: RELATED_TO]->(to_node) SET rel += params.__rel_properties
+    """,
+    [
+        {
+            "__from_node_id": "foo",
+            "__to_node_id": "foo",
+            "__rel_properties": RELATIONSHIP_BETWEEN_TWO_NODES.relationship.properties,
+        }
+    ],
+)
+
+RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP = QueryBatch(
+    """MATCH (from_node: TestType) WHERE from_node.id = params.__from_node_id MATCH (to_node: ComplexType) WHERE to_node.id = params.__to_node_id
+    MERGE (from_node)-[rel: RELATED_TO]->(to_node) ON CREATE SET rel.first_ingested_at = params.__rel_properties['last_ingested_at'] SET rel += params.__rel_properties
     """,
     [
         {
@@ -281,6 +357,21 @@ RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY = QueryBatch(
     ],
 )
 
+
+RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY_AND_TIMESTAMP = QueryBatch(
+    """MATCH (from_node: TestType) WHERE from_node.id = params.__from_node_id MATCH (to_node: ComplexType) WHERE to_node.id_part1 = params.__to_node_id_part1 AND to_node.id_part2 = params.__to_node_id_part2
+    MERGE (from_node)-[rel: RELATED_TO]->(to_node) ON CREATE SET rel.first_ingested_at = params.__rel_properties['last_ingested_at'] SET rel += params.__rel_properties""",
+    [
+        {
+            "__from_node_id": "foo",
+            "__to_node_id_part1": "foo",
+            "__to_node_id_part2": "bar",
+            "__rel_properties": RELATIONSHIP_BETWEEN_TWO_NODES_WITH_MULTI_KEY.relationship.properties,
+        }
+    ],
+)
+
+
 RELATIONSHIP_BETWEEN_TWO_NODES_WITH_MULTI_KEY_AND_CREATE = RelationshipWithNodes(
     from_node=SIMPLE_NODE,
     to_node=COMPLEX_NODE_TWO,
@@ -291,6 +382,19 @@ RELATIONSHIP_BETWEEN_TWO_NODES_WITH_MULTI_KEY_AND_CREATE = RelationshipWithNodes
 RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY_AND_CREATE = QueryBatch(
     """MATCH (from_node: TestType) WHERE from_node.id = params.__from_node_id MATCH (to_node: ComplexType) WHERE to_node.id_part1 = params.__to_node_id_part1 AND to_node.id_part2 = params.__to_node_id_part2
     CREATE (from_node)-[rel: RELATED_TO]->(to_node) SET rel += params.__rel_properties""",
+    [
+        {
+            "__from_node_id": "foo",
+            "__to_node_id_part1": "foo",
+            "__to_node_id_part2": "bar",
+            "__rel_properties": RELATIONSHIP_BETWEEN_TWO_NODES_WITH_MULTI_KEY_AND_CREATE.relationship.properties,
+        }
+    ],
+)
+
+RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY_AND_CREATE_AND_TIMESTAMP = QueryBatch(
+    """MATCH (from_node: TestType) WHERE from_node.id = params.__from_node_id MATCH (to_node: ComplexType) WHERE to_node.id_part1 = params.__to_node_id_part1 AND to_node.id_part2 = params.__to_node_id_part2
+    CREATE (from_node)-[rel: RELATED_TO]->(to_node) SET rel += params.__rel_properties SET rel.first_ingested_at = params.__rel_properties['last_ingested_at']""",
     [
         {
             "__from_node_id": "foo",
@@ -319,6 +423,49 @@ RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY_AND_CREATE = QueryB
 def test_relationship_update_generates_expected_queries(
     query_builder, rel, expected_query
 ):
+    to_op = OperationOnNodeIdentity(rel.to_node.identity_shape, NodeCreationRule.EAGER)
+    from_op = OperationOnNodeIdentity(
+        rel.from_node.identity_shape, NodeCreationRule.MATCH_ONLY
+    )
+    operation = OperationOnRelationshipIdentity(
+        from_op,
+        to_op,
+        rel.relationship.identity_shape,
+        relationship_creation_rule=rel.relationship_creation_rule,
+    )
+    query = query_builder.generate_batch_update_relationship_query_batch(
+        operation, [rel]
+    )
+    assert_that(
+        query.query_statement,
+        equal_to_ignoring_whitespace(expected_query.query_statement),
+    )
+    assert_that(
+        query.batched_parameter_sets, equal_to(expected_query.batched_parameter_sets)
+    )
+
+
+@pytest.mark.parametrize(
+    "rel,expected_query",
+    [
+        [
+            RELATIONSHIP_BETWEEN_TWO_NODES,
+            RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_CREATED_TIMESTAMP,
+        ],
+        [
+            RELATIONSHIP_BETWEEN_TWO_NODES_WITH_MULTI_KEY,
+            RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY_AND_TIMESTAMP,
+        ],
+        [
+            RELATIONSHIP_BETWEEN_TWO_NODES_WITH_MULTI_KEY_AND_CREATE,
+            RELATIONSHIP_BETWEEN_TWO_NODES_EXPECTED_QUERY_WITH_MULTI_KEY_AND_CREATE_AND_TIMESTAMP,
+        ],
+    ],
+)
+def test_relationship_update_with_created_timestamp_generates_expected_queries(
+    query_builder, rel, expected_query
+):
+    query_builder.set_first_ingested_at = True
     to_op = OperationOnNodeIdentity(rel.to_node.identity_shape, NodeCreationRule.EAGER)
     from_op = OperationOnNodeIdentity(
         rel.from_node.identity_shape, NodeCreationRule.MATCH_ONLY
