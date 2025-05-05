@@ -85,7 +85,7 @@ class Neo4jDatabaseConnection:
         return self._driver
 
     def log_query_start(self, query: Query):
-        self.logger.debug(
+        self.logger.info(
             "Executing Cypher Query to Neo4j",
             extra={
                 "query": query.query_statement,
