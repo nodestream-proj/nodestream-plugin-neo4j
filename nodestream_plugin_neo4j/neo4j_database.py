@@ -94,7 +94,7 @@ class Neo4jDatabaseConnection:
         )
 
     def log_record(self, record: Record):
-        self.logger.debug(
+        self.logger.info(
             "Gathered Query Results",
             extra=dict(**record, uri=self.driver._pool.address.host),
         )
