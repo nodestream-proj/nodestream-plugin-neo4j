@@ -1,0 +1,56 @@
+{
+  "name": "Neo4jIngestMonitor",
+  "levelname": "INFO",
+  "pipeline_name": "manual-sox-all-repos-snapshot-ingest",
+  "pipeline_scope": "crons",
+  "message": "Query execution completed successfully",
+  "taskName": "Task-2",
+  "query": "\nCALL apoc.periodic.iterate(\n    $iterable_query,\n    $batched_query,\n    {batchSize: $chunk_size, parallel: $execute_chunks_in_parallel, retries: $retries_per_chunk, params: $iterate_params}\n)\nYIELD batches, committedOperations, failedOperations, errorMessages\nRETURN batches, committedOperations, failedOperations, errorMessages\n",
+  "metrics": {
+    "execution_time_ms": 248,
+    "database_time_ms": 19,
+    "processing_time_ms": 229,
+    "database_name": "neo4j",
+    "server_version": [
+      5,
+      8
+    ],
+    "server_address": [
+      "127.0.0.1",
+      7687
+    ],
+    "database_url": "127.0.0.1:7687",
+    "nodes_created": 0,
+    "nodes_deleted": 0,
+    "relationships_created": 0,
+    "relationships_deleted": 0,
+    "properties_set": 0,
+    "labels_added": 0,
+    "labels_removed": 0,
+    "indexes_added": 0,
+    "indexes_removed": 0,
+    "constraints_added": 0,
+    "constraints_removed": 0,
+    "is_apoc_query": true,
+    "current_batches": 7,
+    "current_committed_operations": 6981,
+    "current_failed_operations": 0,
+    "error_messages": [],
+    "total_batches": 330,
+    "total_committed_operations": 313970,
+    "total_failed_operations": 0,
+    "total_query_execution_time_ms": 20404,
+    "total_queries": 48,
+    "total_failed_queries": 0
+  },
+  "cumulative_stats": {
+    "total_batches": 330,
+    "total_committed_operations": 313970,
+    "total_failed_operations": 0,
+    "total_query_execution_time_ms": 20404,
+    "total_queries": 48,
+    "total_failed_queries": 0
+  },
+  "errors": [],
+  "timestamp": "2025-05-21T21:29:39.389725+00:00"
+}
