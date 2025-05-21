@@ -4,6 +4,7 @@ from typing import Awaitable, Iterable, Tuple, Union
 
 from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession, Record, RoutingControl
 from neo4j.auth_management import AsyncAuthManagers
+from neo4j import EagerResult
 from neo4j.exceptions import (
     AuthError,
     ServiceUnavailable,
@@ -11,6 +12,8 @@ from neo4j.exceptions import (
     TransientError,
 )
 from nodestream.file_io import LazyLoadedArgument
+from .neo4j_ingest_monitor import Neo4jIngestMonitor
+from nodestream.databases.ingest_monitor import NoOpIngestMonitor, IngestMonitor
 
 from .query import Query
 
@@ -73,64 +76,66 @@ class Neo4jDatabaseConnection:
         self.logger = getLogger(self.__class__.__name__)
         self.max_retry_attempts = max_retry_attempts
         self.retry_factor = retry_factor
-        self._driver = None
+        self._driver: AsyncDriver | None = None
 
     def acquire_driver(self) -> AsyncDriver:
         self._driver = self.driver_factory()
 
     @property
-    def driver(self):
+    def driver(self) -> AsyncDriver:
         if self._driver is None:
             self.acquire_driver()
         return self._driver
 
-    def log_query_start(self, query: Query):
-        self.logger.info(
-            "Executing Cypher Query to Neo4j",
-            extra={
-                "query": query.query_statement,
-                "uri": self.driver._pool.address.host,
-            },
-        )
+    # def log_query_start(self, query: Query):
+    #     self.logger.info(
+    #         "Executing Cypher Query to Neo4j",
+    #         extra={
+    #             "query": query.query_statement,
+    #             "uri": self.driver._pool.address.host,
+    #         },
+    #     )
 
-    def log_record(self, record: Record):
-        self.logger.debug(
-            "Gathered Query Results",
-            extra=dict(**record, uri=self.driver._pool.address.host),
-        )
+    # def log_record(self, record: Record):
+    #     self.logger.debug(
+    #         "Gathered Query Results",
+    #         extra=dict(**record, uri=self.driver._pool.address.host),
+    #     )
 
     async def _execute_query(
         self,
         query: Query,
-        log_result: bool = False,
+        monitor: IngestMonitor,
         routing_=RoutingControl.WRITE,
     ) -> Record:
-        result = await self.driver.execute_query(
+        result: EagerResult = await self.driver.execute_query(
             query.query_statement,
             query.parameters,
             database_=self.database_name,
             routing_=routing_,
         )
-        records = result.records
-        if log_result:
-            for record in records:
-                self.log_record(record)
-
-        return records
+        if isinstance(result, EagerResult):
+            monitor.record_query_result(result)
+            records = result.records
+            return records
+        else:
+            monitor.record_query_error(result)
+            raise result
 
     async def execute(
         self,
         query: Query,
-        log_result: bool = False,
+        monitor: IngestMonitor = NoOpIngestMonitor(),
         routing_=RoutingControl.WRITE,
     ) -> Iterable[Record]:
-        self.log_query_start(query)
+        # self.log_query_start(query)
         attempts = 0
         while True:
             attempts += 1
             try:
-                return await self._execute_query(query, log_result, routing_)
+                return await self._execute_query(query, monitor, routing_)
             except RETRYABLE_EXCEPTIONS as e:
+                monitor.record_query_error(e)
                 self.logger.warning(
                     f"Error executing query, retrying. Attempt {attempts + 1}",
                     exc_info=e,

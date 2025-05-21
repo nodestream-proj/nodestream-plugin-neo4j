@@ -1,12 +1,14 @@
 from nodestream.databases import DatabaseConnector, TypeRetriever
 from nodestream.databases.query_executor import QueryExecutor
 from nodestream.schema.migrations import Migrator
+from nodestream.databases.ingest_monitor import IngestMonitor
 
 from .ingest_query_builder import Neo4jIngestQueryBuilder
 from .migrator import Neo4jMigrator
 from .neo4j_database import Neo4jDatabaseConnection
 from .query_executor import Neo4jQueryExecutor
 from .type_retriever import Neo4jTypeRetriever
+from .neo4j_ingest_monitor import Neo4jIngestMonitor
 
 
 class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
@@ -59,7 +61,30 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         self.retries_per_chunk = retries_per_chunk
         self.set_first_ingested_at = set_first_ingested_at
 
-    def make_query_executor(self) -> QueryExecutor:
+    def make_ingest_monitor(self, similarity_threshold: float = 0.8) -> IngestMonitor:
+        """Create a new ingest monitor for tracking query execution metrics.
+        
+        Args:
+            similarity_threshold: The threshold for grouping similar error messages (default: 0.8)
+            
+        Returns:
+            A new Neo4jIngestMonitor instance
+        """
+        return Neo4jIngestMonitor(similarity_threshold=similarity_threshold)
+
+    def make_query_executor(self, ingest_monitor: IngestMonitor = None) -> QueryExecutor:
+        """Create a query executor for executing queries against the database.
+        
+        Args:
+            ingest_monitor: Optional ingest monitor for tracking query execution metrics.
+                          If not provided, a new one will be created.
+                          
+        Returns:
+            A new Neo4jQueryExecutor instance
+        """
+        if ingest_monitor is None:
+            ingest_monitor = self.make_ingest_monitor()
+            
         query_builder = Neo4jIngestQueryBuilder(
             self.use_apoc, self.set_first_ingested_at
         )
@@ -69,6 +94,7 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
             chunk_size=self.chunk_size,
             execute_chunks_in_parallel=self.execute_chunks_in_parallel,
             retries_per_chunk=self.retries_per_chunk,
+            ingest_monitor=ingest_monitor,
         )
 
     def make_type_retriever(self) -> TypeRetriever:

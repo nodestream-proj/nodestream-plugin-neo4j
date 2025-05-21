@@ -1,15 +1,23 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+
+APOC_BATCH_QUERY_RESPONSE_FIELDS = ['batches', 'committedOperations', 'failedOperations', 'errorMessages']
+
 UNWIND_QUERY = "UNWIND $batched_parameter_sets as params RETURN params"
-COMMIT_QUERY = """
+
+# Build the YIELD and RETURN clauses using the standardized fields
+YIELD_CLAUSE = f"YIELD {', '.join(APOC_BATCH_QUERY_RESPONSE_FIELDS)}"
+RETURN_CLAUSE = f"RETURN {', '.join(APOC_BATCH_QUERY_RESPONSE_FIELDS)}"
+
+COMMIT_QUERY = f"""
 CALL apoc.periodic.iterate(
     $iterable_query,
     $batched_query,
-    {batchSize: $chunk_size, parallel: $execute_chunks_in_parallel, retries: $retries_per_chunk, params: $iterate_params}
+    {{batchSize: $chunk_size, parallel: $execute_chunks_in_parallel, retries: $retries_per_chunk, params: $iterate_params}}
 )
-YIELD batches, committedOperations, failedOperations, errorMessages
-RETURN batches, committedOperations, failedOperations, errorMessages
+{YIELD_CLAUSE}
+{RETURN_CLAUSE}
 """
 
 NON_APOCH_COMMIT_QUERY = """
