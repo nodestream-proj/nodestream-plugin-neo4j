@@ -2,8 +2,9 @@ import asyncio
 from logging import getLogger
 from typing import Awaitable, Iterable, Tuple, Union
 
-from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession, Record, RoutingControl
+from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession, EagerResult, Record, RoutingControl
 from neo4j.auth_management import AsyncAuthManagers
+
 from neo4j.exceptions import (
     AuthError,
     ServiceUnavailable,
@@ -11,9 +12,8 @@ from neo4j.exceptions import (
     TransientError,
 )
 from nodestream.file_io import LazyLoadedArgument
-from .neo4j_ingest_monitor import Neo4jIngestMonitor
-
 from .query import Query
+from .result import Neo4jResult, Neo4jMetricRegistry, Neo4jQueryStatistics
 
 RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
 
@@ -106,18 +106,24 @@ class Neo4jDatabaseConnection:
         log_result: bool = False,
         routing_=RoutingControl.WRITE,
     ) -> Record:
-        result = await self.driver.execute_query(
+        result: EagerResult = await self.driver.execute_query(
             query.query_statement,
             query.parameters,
             database_=self.database_name,
             routing_=routing_,
         )
-        records = result.records
+        neo4j_result = Neo4jResult(query, result)
         if log_result:
-            for record in records:
-                self.log_record(record)
+            statistics = neo4j_result.obtain_query_statistics()
+            Neo4jMetricRegistry.update_metrics_from_summary(statistics)
 
-        return records
+        return neo4j_result.records 
+    
+    def log_messages_from_statistics(self, statistics: Neo4jQueryStatistics):
+        for notification in statistics.notifications:
+            self.logger.warning(f"Notification: {notification.code} - {notification.title} - {notification.description}")
+        for error in statistics.error_messages:
+            self.logger.error(f"Error: {error}")
 
     async def execute(
         self,
