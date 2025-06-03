@@ -11,6 +11,7 @@ from neo4j.exceptions import (
     TransientError,
 )
 from nodestream.file_io import LazyLoadedArgument
+from .neo4j_ingest_monitor import Neo4jIngestMonitor
 
 from .query import Query
 
