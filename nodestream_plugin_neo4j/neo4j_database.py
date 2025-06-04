@@ -2,7 +2,14 @@ import asyncio
 from logging import getLogger
 from typing import Awaitable, Iterable, Tuple, Union
 
-from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession, EagerResult, Record, RoutingControl
+from neo4j import (
+    AsyncDriver,
+    AsyncGraphDatabase,
+    AsyncSession,
+    EagerResult,
+    Record,
+    RoutingControl,
+)
 from neo4j.auth_management import AsyncAuthManagers
 
 from neo4j.exceptions import (
@@ -117,11 +124,13 @@ class Neo4jDatabaseConnection:
             statistics = neo4j_result.obtain_query_statistics()
             Neo4jMetricRegistry.update_metrics_from_summary(statistics)
 
-        return neo4j_result.records 
-    
+        return neo4j_result.records
+
     def log_messages_from_statistics(self, statistics: Neo4jQueryStatistics):
         for notification in statistics.notifications:
-            self.logger.warning(f"Notification: {notification.code} - {notification.title} - {notification.description}")
+            self.logger.warning(
+                f"Notification: {notification.code} - {notification.title} - {notification.description}"
+            )
         for error in statistics.error_messages:
             self.logger.error(f"Error: {error}")
 

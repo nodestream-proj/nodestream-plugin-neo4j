@@ -1,46 +1,54 @@
 from dataclasses import dataclass
 from typing import Any
 
+
 @dataclass
 class ApocOperations:
     """Type definition for APOC operations metrics."""
-    total: int = 0      # Total number of operations
+
+    total: int = 0  # Total number of operations
     errors: dict[str, Any] = None  # Operation errors
     committed: int = 0  # Number of committed operations
-    failed: int = 0     # Number of failed operations
+    failed: int = 0  # Number of failed operations
 
     def __post_init__(self):
         if self.errors is None:
             self.errors = {}
+
 
 @dataclass
 class ApocBatch:
     """Type definition for APOC batch metrics."""
-    total: int = 0      # Total number of batches
+
+    total: int = 0  # Total number of batches
     errors: dict[str, Any] = None  # Batch errors
     committed: int = 0  # Number of committed batches
-    failed: int = 0     # Number of failed batches
+    failed: int = 0  # Number of failed batches
 
     def __post_init__(self):
         if self.errors is None:
             self.errors = {}
 
+
 @dataclass
 class ApocUpdateStatistics:
     """Type definition for APOC update statistics."""
+
     relationshipsDeleted: int = 0  # Number of relationships deleted
     relationshipsCreated: int = 0  # Number of relationships created
-    nodesDeleted: int = 0         # Number of nodes deleted
-    nodesCreated: int = 0         # Number of nodes created
-    labelsRemoved: int = 0        # Number of labels removed
-    labelsAdded: int = 0          # Number of labels added
-    propertiesSet: int = 0        # Number of properties set
+    nodesDeleted: int = 0  # Number of nodes deleted
+    nodesCreated: int = 0  # Number of nodes created
+    labelsRemoved: int = 0  # Number of labels removed
+    labelsAdded: int = 0  # Number of labels added
+    propertiesSet: int = 0  # Number of properties set
+
 
 @dataclass
 class ApocBatchResponse:
     """Type definition for APOC periodic.iterate response fields."""
+
     batches: int = 0  # Number of batches processed
-    total: int = 0    # Total number of operations
+    total: int = 0  # Total number of operations
     timeTaken: int = 0  # Time taken in milliseconds
     committedOperations: int = 0  # Number of operations committed
     failedOperations: int = 0  # Number of operations that failed
@@ -65,8 +73,11 @@ class ApocBatchResponse:
         if self.updateStatistics is None:
             self.updateStatistics = ApocUpdateStatistics()
 
+
 # Get fields from ApocBatchResponse dataclass
-APOC_BATCH_QUERY_RESPONSE_FIELDS = [field.name for field in ApocBatchResponse.__dataclass_fields__.values()]
+APOC_BATCH_QUERY_RESPONSE_FIELDS = [
+    field.name for field in ApocBatchResponse.__dataclass_fields__.values()
+]
 
 UNWIND_QUERY = "UNWIND $batched_parameter_sets as params RETURN params"
 
@@ -120,7 +131,7 @@ class Query:
                 "chunk_size": chunk_size,
                 "retries_per_chunk": retries_per_chunk,
             },
-            is_apoc=True  # This is an APOC query
+            is_apoc=True,  # This is an APOC query
         )
 
 
@@ -149,5 +160,5 @@ class QueryBatch:
                 "chunk_size": chunk_size,
                 "retries_per_chunk": retries_per_chunk,
             },
-            is_apoc=apoc_iterate  # Set is_apoc based on apoc_iterate parameter
+            is_apoc=apoc_iterate,  # Set is_apoc based on apoc_iterate parameter
         )
