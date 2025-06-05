@@ -26,7 +26,7 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         execute_chunks_in_parallel: bool = True,
         retries_per_chunk: int = 3,
         _experimental_set_first_ingested_at: bool = False,
-        **connection_args
+        **connection_args,
     ):
         database_connection = Neo4jDatabaseConnection.from_configuration(
             **connection_args

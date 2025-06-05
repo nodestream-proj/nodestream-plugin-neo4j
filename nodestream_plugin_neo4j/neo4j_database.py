@@ -11,7 +11,6 @@ from neo4j import (
     RoutingControl,
 )
 from neo4j.auth_management import AsyncAuthManagers
-
 from neo4j.exceptions import (
     AuthError,
     ServiceUnavailable,
@@ -19,8 +18,9 @@ from neo4j.exceptions import (
     TransientError,
 )
 from nodestream.file_io import LazyLoadedArgument
+
 from .query import Query
-from .result import Neo4jResult, Neo4jMetricRegistry, Neo4jQueryStatistics
+from .result import Neo4jMetricRegistry, Neo4jQueryStatistics, Neo4jResult
 
 RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
 
@@ -82,6 +82,7 @@ class Neo4jDatabaseConnection:
         self.max_retry_attempts = max_retry_attempts
         self.retry_factor = retry_factor
         self._driver = None
+        self.count = 0
 
     def acquire_driver(self) -> AsyncDriver:
         self._driver = self.driver_factory()
@@ -93,19 +94,21 @@ class Neo4jDatabaseConnection:
         return self._driver
 
     def log_query_start(self, query: Query):
-        self.logger.info(
-            "Executing Cypher Query to Neo4j",
-            extra={
-                "query": query.query_statement,
-                "uri": self.driver._pool.address.host,
-            },
-        )
+        # self.logger.info(
+        #     "Executing Cypher Query to Neo4j",
+        #     extra={
+        #         "query": query.query_statement,
+        #         "uri": self.driver._pool.address.host,
+        #     },
+        # )
+        pass
 
     def log_record(self, record: Record):
-        self.logger.debug(
-            "Gathered Query Results",
-            extra=dict(**record, uri=self.driver._pool.address.host),
-        )
+        # self.logger.debug(
+        #     "Gathered Query Results",
+        #     extra=dict(**record, uri=self.driver._pool.address.host),
+        # )
+        pass
 
     async def _execute_query(
         self,

@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-from neo4j import EagerResult, Record, ResultSummary
 from logging import getLogger
-from .query import Query, ApocBatchResponse
+from typing import Any, Dict, List, Optional
+
 from dacite import from_dict
-from nodestream.metrics import MetricRegistry, Metric, Metrics
+from neo4j import EagerResult, Record, ResultSummary
+from nodestream.metrics import Metric, MetricRegistry, Metrics
+
+from .query import ApocBatchResponse, Query
 
 
 @dataclass
