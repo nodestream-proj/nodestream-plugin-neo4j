@@ -29,11 +29,13 @@ venv: poetry.lock
 format: venv
 	poetry run black nodestream_plugin_neo4j tests
 	poetry run isort nodestream_plugin_neo4j tests
+	poetry run ruff format nodestream_plugin_neo4j tests
 
 .PHONY: lint
 lint: venv
 	poetry run black nodestream_plugin_neo4j tests --check
-	poetry run ruff nodestream_plugin_neo4j tests
+	poetry run ruff check nodestream_plugin_neo4j tests
+	poetry run isort nodestream_plugin_neo4j tests --check
 
 .PHONY: test-unit
 test-unit: venv

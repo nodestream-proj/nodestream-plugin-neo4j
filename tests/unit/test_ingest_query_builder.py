@@ -49,6 +49,7 @@ BASIC_NODE_TTL_EXPECTED_QUERY = Query(
         "chunk_size": DEFAULT_CHUNK_SIZE,
         "retries_per_chunk": DEFAULT_RETRIES_PER_CHUNK,
     },
+    is_apoc=True,
 )
 
 NODE_TTL_WITH_CUSTOM_QUERY = TimeToLiveConfiguration(
@@ -67,6 +68,7 @@ NODE_TTL_WITH_CUSTOM_QUERY_EXPECTED_QUERY = Query(
         "chunk_size": DEFAULT_CHUNK_SIZE,
         "retries_per_chunk": DEFAULT_RETRIES_PER_CHUNK,
     },
+    is_apoc=True,
 )
 
 BASIC_REL_TTL = TimeToLiveConfiguration(
@@ -84,6 +86,7 @@ BASIC_REL_TTL_EXPECTED_QUERY = Query(
         "chunk_size": DEFAULT_CHUNK_SIZE,
         "retries_per_chunk": DEFAULT_RETRIES_PER_CHUNK,
     },
+    is_apoc=True,
 )
 
 REL_TTL_WITH_CUSTOM_QUERY = TimeToLiveConfiguration(
@@ -102,6 +105,7 @@ REL_TTL_WITH_CUSTOM_QUERY_EXPECTED_QUERY = Query(
         "chunk_size": DEFAULT_CHUNK_SIZE,
         "retries_per_chunk": DEFAULT_RETRIES_PER_CHUNK,
     },
+    is_apoc=True,
 )
 
 NODE_TTL_WITH_BATCH_PARAMS = TimeToLiveConfiguration(
@@ -121,6 +125,7 @@ NODE_TTL_WITH_BATCH_PARAMS_EXPECTED_QUERY = Query(
         "chunk_size": 200,
         "retries_per_chunk": DEFAULT_RETRIES_PER_CHUNK,
     },
+    is_apoc=True,
 )
 
 REL_TTL_WITH_BATCH_PARAMS = TimeToLiveConfiguration(
@@ -140,6 +145,7 @@ REL_TTL_WITH_BATCH_PARAMS_EXPECTED_QUERY = Query(
         "chunk_size": 200,
         "retries_per_chunk": DEFAULT_RETRIES_PER_CHUNK,
     },
+    is_apoc=True,
 )
 
 

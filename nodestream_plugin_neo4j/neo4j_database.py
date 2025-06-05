@@ -2,7 +2,14 @@ import asyncio
 from logging import getLogger
 from typing import Awaitable, Iterable, Tuple, Union
 
-from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession, Record, RoutingControl
+from neo4j import (
+    AsyncDriver,
+    AsyncGraphDatabase,
+    AsyncSession,
+    EagerResult,
+    Record,
+    RoutingControl,
+)
 from neo4j.auth_management import AsyncAuthManagers
 from neo4j.exceptions import (
     AuthError,
@@ -13,6 +20,7 @@ from neo4j.exceptions import (
 from nodestream.file_io import LazyLoadedArgument
 
 from .query import Query
+from .result import Neo4jMetricRegistry, Neo4jQueryStatistics, Neo4jResult
 
 RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
 
@@ -74,6 +82,7 @@ class Neo4jDatabaseConnection:
         self.max_retry_attempts = max_retry_attempts
         self.retry_factor = retry_factor
         self._driver = None
+        self.count = 0
 
     def acquire_driver(self) -> AsyncDriver:
         self._driver = self.driver_factory()
@@ -85,19 +94,21 @@ class Neo4jDatabaseConnection:
         return self._driver
 
     def log_query_start(self, query: Query):
-        self.logger.info(
-            "Executing Cypher Query to Neo4j",
-            extra={
-                "query": query.query_statement,
-                "uri": self.driver._pool.address.host,
-            },
-        )
+        # self.logger.info(
+        #     "Executing Cypher Query to Neo4j",
+        #     extra={
+        #         "query": query.query_statement,
+        #         "uri": self.driver._pool.address.host,
+        #     },
+        # )
+        pass
 
     def log_record(self, record: Record):
-        self.logger.debug(
-            "Gathered Query Results",
-            extra=dict(**record, uri=self.driver._pool.address.host),
-        )
+        # self.logger.debug(
+        #     "Gathered Query Results",
+        #     extra=dict(**record, uri=self.driver._pool.address.host),
+        # )
+        pass
 
     async def _execute_query(
         self,
@@ -105,18 +116,26 @@ class Neo4jDatabaseConnection:
         log_result: bool = False,
         routing_=RoutingControl.WRITE,
     ) -> Record:
-        result = await self.driver.execute_query(
+        result: EagerResult = await self.driver.execute_query(
             query.query_statement,
             query.parameters,
             database_=self.database_name,
             routing_=routing_,
         )
-        records = result.records
+        neo4j_result = Neo4jResult(query, result)
         if log_result:
-            for record in records:
-                self.log_record(record)
+            statistics = neo4j_result.obtain_query_statistics()
+            Neo4jMetricRegistry.update_metrics_from_summary(statistics)
 
-        return records
+        return neo4j_result.records
+
+    def log_messages_from_statistics(self, statistics: Neo4jQueryStatistics):
+        for notification in statistics.notifications:
+            self.logger.warning(
+                f"Notification: {notification.code} - {notification.title} - {notification.description}"
+            )
+        for error in statistics.error_messages:
+            self.logger.error(f"Error: {error}")
 
     async def execute(
         self,
