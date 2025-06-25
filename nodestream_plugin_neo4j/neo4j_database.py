@@ -20,7 +20,7 @@ from neo4j.exceptions import (
 from nodestream.file_io import LazyLoadedArgument
 
 from .query import Query
-from .result import Neo4jMetricRegistry, Neo4jQueryStatistics, Neo4jResult
+from .result import update_metrics_from_summary, Neo4jQueryStatistics, Neo4jResult
 
 RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
 
@@ -125,7 +125,7 @@ class Neo4jDatabaseConnection:
         neo4j_result = Neo4jResult(query, result)
         if log_result:
             statistics = neo4j_result.obtain_query_statistics()
-            Neo4jMetricRegistry.update_metrics_from_summary(statistics)
+            update_metrics_from_summary(statistics)
 
         return neo4j_result.records
 
