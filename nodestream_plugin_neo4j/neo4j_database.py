@@ -20,7 +20,7 @@ from neo4j.exceptions import (
 from nodestream.file_io import LazyLoadedArgument
 
 from .query import Query
-from .result import update_metrics_from_summary, Neo4jQueryStatistics, Neo4jResult
+from .result import Neo4jQueryStatistics, Neo4jResult, update_metrics_from_summary
 
 RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
 
@@ -125,17 +125,14 @@ class Neo4jDatabaseConnection:
         neo4j_result = Neo4jResult(query, result)
         if log_result:
             statistics = neo4j_result.obtain_query_statistics()
+            self.log_error_messages_from_statistics(statistics)
             update_metrics_from_summary(statistics)
 
         return neo4j_result.records
 
-    def log_messages_from_statistics(self, statistics: Neo4jQueryStatistics):
-        for notification in statistics.notifications:
-            self.logger.warning(
-                f"Notification: {notification.code} - {notification.title} - {notification.description}"
-            )
+    def log_error_messages_from_statistics(self, statistics: Neo4jQueryStatistics):
         for error in statistics.error_messages:
-            self.logger.error(f"Error: {error}")
+            self.logger.error(f"Query Errors Occured: {error}")
 
     async def execute(
         self,

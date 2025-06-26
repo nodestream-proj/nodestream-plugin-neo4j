@@ -3,34 +3,6 @@ from typing import Any
 
 
 @dataclass
-class ApocOperations:
-    """Type definition for APOC operations metrics."""
-
-    total: int = 0  # Total number of operations
-    errors: dict[str, Any] = None  # Operation errors
-    committed: int = 0  # Number of committed operations
-    failed: int = 0  # Number of failed operations
-
-    def __post_init__(self):
-        if self.errors is None:
-            self.errors = {}
-
-
-@dataclass
-class ApocBatch:
-    """Type definition for APOC batch metrics."""
-
-    total: int = 0  # Total number of batches
-    errors: dict[str, Any] = None  # Batch errors
-    committed: int = 0  # Number of committed batches
-    failed: int = 0  # Number of failed batches
-
-    def __post_init__(self):
-        if self.errors is None:
-            self.errors = {}
-
-
-@dataclass
 class ApocUpdateStatistics:
     """Type definition for APOC update statistics."""
 
@@ -55,21 +27,12 @@ class ApocBatchResponse:
     failedBatches: int = 0  # Number of batches that failed
     retries: int = 0  # Number of retries performed
     errorMessages: dict[str, Any] = None  # Map of error messages
-    batch: ApocBatch = None  # Current batch information
-    operations: ApocOperations = None  # Operations information
     wasTerminated: bool = False  # Whether the operation was terminated
-    failedParams: dict[str, Any] = None  # Parameters that caused failures
     updateStatistics: ApocUpdateStatistics = None  # Statistics about updates
 
     def __post_init__(self):
         if self.errorMessages is None:
             self.errorMessages = {}
-        if self.failedParams is None:
-            self.failedParams = {}
-        if self.batch is None:
-            self.batch = ApocBatch()
-        if self.operations is None:
-            self.operations = ApocOperations()
         if self.updateStatistics is None:
             self.updateStatistics = ApocUpdateStatistics()
 

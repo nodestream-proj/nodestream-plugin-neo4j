@@ -77,7 +77,6 @@ class Neo4jQueryStatistics:
 
     # Error tracking
     error_messages: List[str] = field(default_factory=list)
-    notifications: List[Dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_result(
@@ -97,19 +96,6 @@ class Neo4jQueryStatistics:
             + summary.result_consumed_after,
         )
 
-        # Set notifications
-        if summary.notifications:
-            stats.notifications = [
-                {
-                    "severity": n.severity,
-                    "code": n.code,
-                    "title": n.title,
-                    "description": n.description,
-                    "position": n.position.__dict__ if n.position else None,
-                }
-                for n in summary.notifications
-            ]
-
         # Handle APOC metrics if present
         if apoc_response:
             stats.is_apoc_query = True
@@ -120,25 +106,9 @@ class Neo4jQueryStatistics:
             if hasattr(apoc_response, "timeTaken"):
                 stats.timing.apoc_time_ms = apoc_response.timeTaken
 
-            # Set batch metrics
-            stats.batches = Neo4jBatchMetrics(
-                total=apoc_response.batch.total,
-                committed=apoc_response.batch.committed,
-                failed=apoc_response.batch.failed,
-                errors=apoc_response.batch.errors,
-            )
-
-            # Set operation metrics
-            stats.operations = Neo4jOperationMetrics(
-                total=apoc_response.operations.total,
-                committed=apoc_response.operations.committed,
-                failed=apoc_response.operations.failed,
-                errors=apoc_response.operations.errors,
-            )
-
             # Set error messages
             if apoc_response.errorMessages:
-                stats.error_messages.extend(apoc_response.errorMessages.values())
+                stats.error_messages.extend(apoc_response.errorMessages.keys())
 
             # Set write metrics from APOC update statistics
             if apoc_response.updateStatistics:
@@ -186,7 +156,7 @@ class Neo4jResult:
             try:
                 apoc_response = from_dict(ApocBatchResponse, dict(self.records[0]))
             except Exception as e:
-                getLogger().error(f"Error parsing APOC response: {e}")
+                getLogger().error(f"Error parsing APOC response: {e}", exc_info=True)
                 raise e
 
         # Create consolidated statistics
@@ -263,42 +233,14 @@ INDEXES_REMOVED = Metric(
 )
 
 # APOC specific metrics
-IS_APOC = Metric("neo4j_query_is_apoc", "Whether the query is an APOC query.")
 WAS_TERMINATED = Metric(
     "neo4j_query_was_terminated", "Whether the Neo4j query was terminated."
 )
 RETRIES = Metric("neo4j_query_retries", "Number of retries in the Neo4j query.")
 
-# Batch metrics
-BATCH_TOTAL = Metric(
-    "neo4j_query_batch_total", "Total number of batches in the Neo4j query."
-)
-BATCH_COMMITTED = Metric(
-    "neo4j_query_batch_committed", "Number of batches committed in the Neo4j query."
-)
-BATCH_FAILED = Metric(
-    "neo4j_query_batch_failed", "Number of batches failed in the Neo4j query."
-)
-
-# Operation metrics
-OPERATIONS_TOTAL = Metric(
-    "neo4j_query_operations_total", "Total number of operations in the Neo4j query."
-)
-OPERATIONS_COMMITTED = Metric(
-    "neo4j_query_operations_committed",
-    "Number of operations committed in the Neo4j query.",
-)
-OPERATIONS_FAILED = Metric(
-    "neo4j_query_operations_failed",
-    "Number of operations failed in the Neo4j query.",
-)
-
 # Error tracking
 ERROR_MESSAGES = Metric(
     "neo4j_query_error_messages", "Number of error messages in the Neo4j query."
-)
-NOTIFICATIONS = Metric(
-    "neo4j_query_notifications", "Number of notifications in the Neo4j query."
 )
 
 
@@ -322,30 +264,14 @@ def update_metrics_from_summary(statistics: Neo4jQueryStatistics):
     metrics.increment(PROPERTIES_SET, statistics.write_metrics.properties_set)
     metrics.increment(LABELS_ADDED, statistics.write_metrics.labels_added)
     metrics.increment(LABELS_REMOVED, statistics.write_metrics.labels_removed)
-    metrics.increment(
-        CONSTRAINTS_ADDED, statistics.write_metrics.constraints_added
-    )
-    metrics.increment(
-        CONSTRAINTS_REMOVED, statistics.write_metrics.constraints_removed
-    )
+    metrics.increment(CONSTRAINTS_ADDED, statistics.write_metrics.constraints_added)
+    metrics.increment(CONSTRAINTS_REMOVED, statistics.write_metrics.constraints_removed)
     metrics.increment(INDEXES_ADDED, statistics.write_metrics.indexes_added)
     metrics
 
     # APOC specific metrics
-    metrics.increment(IS_APOC, int(statistics.is_apoc_query))
     metrics.increment(WAS_TERMINATED, int(statistics.was_terminated))
     metrics.increment(RETRIES, statistics.retries)
 
-    # Batch metrics
-    metrics.increment(BATCH_TOTAL, statistics.batches.total)
-    metrics.increment(BATCH_COMMITTED, statistics.batches.committed)
-    metrics.increment(BATCH_FAILED, statistics.batches.failed)
-
-    # Operation metrics
-    metrics.increment(OPERATIONS_TOTAL, statistics.operations.total)
-    metrics.increment(OPERATIONS_COMMITTED, statistics.operations.committed)
-    metrics.increment(OPERATIONS_FAILED, statistics.operations.failed)
-
     # Error tracking
     metrics.increment(ERROR_MESSAGES, len(statistics.error_messages))
-    metrics.increment(NOTIFICATIONS, len(statistics.notifications))
