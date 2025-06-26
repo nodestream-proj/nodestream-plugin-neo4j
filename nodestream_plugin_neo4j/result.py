@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from logging import getLogger
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from dacite import from_dict
 from neo4j import EagerResult, Record, ResultSummary
