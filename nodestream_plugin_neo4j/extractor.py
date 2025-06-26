@@ -15,7 +15,7 @@ class Neo4jExtractor(Extractor):
         query: str,
         parameters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
-        **connection_args
+        **connection_args,
     ):
         connector = Neo4jDatabaseConnection.from_configuration(**connection_args)
         return cls(query, connector, parameters, limit)
