@@ -37,26 +37,6 @@ class Neo4jWriteMetrics:
 
 
 @dataclass
-class Neo4jBatchMetrics:
-    """Batch operation metrics from APOC."""
-
-    total: int = 0
-    committed: int = 0
-    failed: int = 0
-    errors: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class Neo4jOperationMetrics:
-    """Operation metrics from APOC."""
-
-    total: int = 0
-    committed: int = 0
-    failed: int = 0
-    errors: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
 class Neo4jQueryStatistics:
     """Consolidated statistics from both APOC metrics and query summary."""
 
@@ -70,8 +50,6 @@ class Neo4jQueryStatistics:
 
     # APOC specific metrics
     is_apoc_query: bool = False
-    batches: Neo4jBatchMetrics = field(default_factory=Neo4jBatchMetrics)
-    operations: Neo4jOperationMetrics = field(default_factory=Neo4jOperationMetrics)
     was_terminated: bool = False
     retries: int = 0
 
@@ -162,14 +140,6 @@ class Neo4jResult:
         # Create consolidated statistics
         statistics = Neo4jQueryStatistics.from_result(self.summary, apoc_response)
         return statistics
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the result to a dictionary format."""
-        return {
-            "records": [dict(record) for record in self.records],
-            "keys": self.keys,
-            "statistics": self.statistics.to_dict(),
-        }
 
 
 # Timing metrics
@@ -267,7 +237,6 @@ def update_metrics_from_summary(statistics: Neo4jQueryStatistics):
     metrics.increment(CONSTRAINTS_ADDED, statistics.write_metrics.constraints_added)
     metrics.increment(CONSTRAINTS_REMOVED, statistics.write_metrics.constraints_removed)
     metrics.increment(INDEXES_ADDED, statistics.write_metrics.indexes_added)
-    metrics
 
     # APOC specific metrics
     metrics.increment(WAS_TERMINATED, int(statistics.was_terminated))
