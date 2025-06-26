@@ -117,7 +117,6 @@ class Neo4jQueryStatistics:
     write_metrics: Neo4jWriteMetrics = field(default_factory=Neo4jWriteMetrics)
 
     # APOC specific metrics
-    is_apoc_query: bool = False
     was_terminated: bool = False
     retries: int = 0
 
@@ -141,7 +140,6 @@ class Neo4jQueryStatistics:
 
         # Handle APOC metrics if present
         if apoc_response:
-            stats.is_apoc_query = True
             stats.was_terminated = apoc_response.wasTerminated
             stats.retries = apoc_response.retries
 
