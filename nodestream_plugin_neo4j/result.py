@@ -8,6 +8,77 @@ from nodestream.metrics import Metric, Metrics
 
 from .query import ApocBatchResponse, Query
 
+# Timing metrics
+PLANNING_TIME = Metric(
+    "neo4j_query_planning_time_ms", "Time taken to plan the Neo4j query."
+)
+PROCESSING_TIME = Metric(
+    "neo4j_query_processing_time_ms", "Time taken to execute the Neo4j query."
+)
+TOTAL_TIME = Metric(
+    "neo4j_query_total_time_ms", "Total time taken to execute the Neo4j query."
+)
+APOC_TIME = Metric(
+    "neo4j_query_apoc_time_ms", "Time taken to execute the Neo4j query using APOC."
+)
+
+# Write metrics
+NODES_CREATED = Metric(
+    "neo4j_query_write_metrics_nodes_created",
+    "Number of nodes created in the Neo4j query.",
+)
+NODES_DELETED = Metric(
+    "neo4j_query_write_metrics_nodes_deleted",
+    "Number of nodes deleted in the Neo4j query.",
+)
+RELATIONSHIPS_CREATED = Metric(
+    "neo4j_query_write_metrics_relationships_created",
+    "Number of relationships created in the Neo4j query.",
+)
+RELATIONSHIPS_DELETED = Metric(
+    "neo4j_query_write_metrics_relationships_deleted",
+    "Number of relationships deleted in the Neo4j query.",
+)
+PROPERTIES_SET = Metric(
+    "neo4j_query_write_metrics_properties_set",
+    "Number of properties set in the Neo4j query.",
+)
+LABELS_ADDED = Metric(
+    "neo4j_query_write_metrics_labels_added",
+    "Number of labels added in the Neo4j query.",
+)
+LABELS_REMOVED = Metric(
+    "neo4j_query_write_metrics_labels_removed",
+    "Number of labels removed in the Neo4j query.",
+)
+CONSTRAINTS_ADDED = Metric(
+    "neo4j_query_write_metrics_constraints_added",
+    "Number of constraints added in the Neo4j query.",
+)
+CONSTRAINTS_REMOVED = Metric(
+    "neo4j_query_write_metrics_constraints_removed",
+    "Number of constraints removed in the Neo4j query.",
+)
+INDEXES_ADDED = Metric(
+    "neo4j_query_write_metrics_indexes_added",
+    "Number of indexes added in the Neo4j query.",
+)
+INDEXES_REMOVED = Metric(
+    "neo4j_query_write_metrics_indexes_removed",
+    "Number of indexes removed in the Neo4j query.",
+)
+
+# APOC specific metrics
+WAS_TERMINATED = Metric(
+    "neo4j_query_was_terminated", "Whether the Neo4j query was terminated."
+)
+RETRIES = Metric("neo4j_query_retries", "Number of retries in the Neo4j query.")
+
+# Error tracking
+ERROR_MESSAGES = Metric(
+    "neo4j_query_error_messages", "Number of error messages in the Neo4j query."
+)
+
 
 @dataclass
 class Neo4jTimingMetrics:
@@ -117,6 +188,37 @@ class Neo4jQueryStatistics:
 
         return stats
 
+    def update_metrics_from_summary(self):
+        metrics = Metrics.get()
+        # Timing metrics
+        metrics.increment(PLANNING_TIME, self.timing.planning_time_ms)
+        metrics.increment(PROCESSING_TIME, self.timing.processing_time_ms)
+        metrics.increment(TOTAL_TIME, self.timing.total_time_ms)
+        metrics.increment(APOC_TIME, self.timing.apoc_time_ms)
+
+        # Write metrics
+        metrics.increment(NODES_CREATED, self.write_metrics.nodes_created)
+        metrics.increment(NODES_DELETED, self.write_metrics.nodes_deleted)
+        metrics.increment(
+            RELATIONSHIPS_CREATED, self.write_metrics.relationships_created
+        )
+        metrics.increment(
+            RELATIONSHIPS_DELETED, self.write_metrics.relationships_deleted
+        )
+        metrics.increment(PROPERTIES_SET, self.write_metrics.properties_set)
+        metrics.increment(LABELS_ADDED, self.write_metrics.labels_added)
+        metrics.increment(LABELS_REMOVED, self.write_metrics.labels_removed)
+        metrics.increment(CONSTRAINTS_ADDED, self.write_metrics.constraints_added)
+        metrics.increment(CONSTRAINTS_REMOVED, self.write_metrics.constraints_removed)
+        metrics.increment(INDEXES_ADDED, self.write_metrics.indexes_added)
+
+        # APOC specific metrics
+        metrics.increment(WAS_TERMINATED, int(self.was_terminated))
+        metrics.increment(RETRIES, self.retries)
+
+        # Error tracking
+        metrics.increment(ERROR_MESSAGES, len(self.error_messages))
+
 
 class Neo4jResult:
     """Container for Neo4j query results with consolidated statistics."""
@@ -131,116 +233,8 @@ class Neo4jResult:
         # Extract APOC response if this is an APOC query
         apoc_response = None
         if self.query.is_apoc and self.records:
-            try:
-                apoc_response = from_dict(ApocBatchResponse, dict(self.records[0]))
-            except Exception as e:
-                getLogger().error(f"Error parsing APOC response: {e}", exc_info=True)
-                raise e
+            apoc_response = from_dict(ApocBatchResponse, dict(self.records[0]))
 
         # Create consolidated statistics
         statistics = Neo4jQueryStatistics.from_result(self.summary, apoc_response)
         return statistics
-
-
-# Timing metrics
-PLANNING_TIME = Metric(
-    "neo4j_query_planning_time_ms", "Time taken to plan the Neo4j query."
-)
-PROCESSING_TIME = Metric(
-    "neo4j_query_processing_time_ms", "Time taken to execute the Neo4j query."
-)
-TOTAL_TIME = Metric(
-    "neo4j_query_total_time_ms", "Total time taken to execute the Neo4j query."
-)
-APOC_TIME = Metric(
-    "neo4j_query_apoc_time_ms", "Time taken to execute the Neo4j query using APOC."
-)
-
-# Write metrics
-NODES_CREATED = Metric(
-    "neo4j_query_write_metrics_nodes_created",
-    "Number of nodes created in the Neo4j query.",
-)
-NODES_DELETED = Metric(
-    "neo4j_query_write_metrics_nodes_deleted",
-    "Number of nodes deleted in the Neo4j query.",
-)
-RELATIONSHIPS_CREATED = Metric(
-    "neo4j_query_write_metrics_relationships_created",
-    "Number of relationships created in the Neo4j query.",
-)
-RELATIONSHIPS_DELETED = Metric(
-    "neo4j_query_write_metrics_relationships_deleted",
-    "Number of relationships deleted in the Neo4j query.",
-)
-PROPERTIES_SET = Metric(
-    "neo4j_query_write_metrics_properties_set",
-    "Number of properties set in the Neo4j query.",
-)
-LABELS_ADDED = Metric(
-    "neo4j_query_write_metrics_labels_added",
-    "Number of labels added in the Neo4j query.",
-)
-LABELS_REMOVED = Metric(
-    "neo4j_query_write_metrics_labels_removed",
-    "Number of labels removed in the Neo4j query.",
-)
-CONSTRAINTS_ADDED = Metric(
-    "neo4j_query_write_metrics_constraints_added",
-    "Number of constraints added in the Neo4j query.",
-)
-CONSTRAINTS_REMOVED = Metric(
-    "neo4j_query_write_metrics_constraints_removed",
-    "Number of constraints removed in the Neo4j query.",
-)
-INDEXES_ADDED = Metric(
-    "neo4j_query_write_metrics_indexes_added",
-    "Number of indexes added in the Neo4j query.",
-)
-INDEXES_REMOVED = Metric(
-    "neo4j_query_write_metrics_indexes_removed",
-    "Number of indexes removed in the Neo4j query.",
-)
-
-# APOC specific metrics
-WAS_TERMINATED = Metric(
-    "neo4j_query_was_terminated", "Whether the Neo4j query was terminated."
-)
-RETRIES = Metric("neo4j_query_retries", "Number of retries in the Neo4j query.")
-
-# Error tracking
-ERROR_MESSAGES = Metric(
-    "neo4j_query_error_messages", "Number of error messages in the Neo4j query."
-)
-
-
-def update_metrics_from_summary(statistics: Neo4jQueryStatistics):
-    metrics = Metrics.get()
-    # Timing metrics
-    metrics.increment(PLANNING_TIME, statistics.timing.planning_time_ms)
-    metrics.increment(PROCESSING_TIME, statistics.timing.processing_time_ms)
-    metrics.increment(TOTAL_TIME, statistics.timing.total_time_ms)
-    metrics.increment(APOC_TIME, statistics.timing.apoc_time_ms)
-
-    # Write metrics
-    metrics.increment(NODES_CREATED, statistics.write_metrics.nodes_created)
-    metrics.increment(NODES_DELETED, statistics.write_metrics.nodes_deleted)
-    metrics.increment(
-        RELATIONSHIPS_CREATED, statistics.write_metrics.relationships_created
-    )
-    metrics.increment(
-        RELATIONSHIPS_DELETED, statistics.write_metrics.relationships_deleted
-    )
-    metrics.increment(PROPERTIES_SET, statistics.write_metrics.properties_set)
-    metrics.increment(LABELS_ADDED, statistics.write_metrics.labels_added)
-    metrics.increment(LABELS_REMOVED, statistics.write_metrics.labels_removed)
-    metrics.increment(CONSTRAINTS_ADDED, statistics.write_metrics.constraints_added)
-    metrics.increment(CONSTRAINTS_REMOVED, statistics.write_metrics.constraints_removed)
-    metrics.increment(INDEXES_ADDED, statistics.write_metrics.indexes_added)
-
-    # APOC specific metrics
-    metrics.increment(WAS_TERMINATED, int(statistics.was_terminated))
-    metrics.increment(RETRIES, statistics.retries)
-
-    # Error tracking
-    metrics.increment(ERROR_MESSAGES, len(statistics.error_messages))

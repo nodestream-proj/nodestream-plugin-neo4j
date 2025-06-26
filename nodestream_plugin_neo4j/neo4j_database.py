@@ -20,7 +20,7 @@ from neo4j.exceptions import (
 from nodestream.file_io import LazyLoadedArgument
 
 from .query import Query
-from .result import Neo4jQueryStatistics, Neo4jResult, update_metrics_from_summary
+from .result import Neo4jQueryStatistics, Neo4jResult
 
 RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
 
@@ -82,7 +82,7 @@ class Neo4jDatabaseConnection:
         self.max_retry_attempts = max_retry_attempts
         self.retry_factor = retry_factor
         self._driver = None
-        self.count = 0
+        self.counts_by_query: set[Query] = set()
 
     def acquire_driver(self) -> AsyncDriver:
         self._driver = self.driver_factory()
@@ -94,21 +94,12 @@ class Neo4jDatabaseConnection:
         return self._driver
 
     def log_query_start(self, query: Query):
-        # self.logger.info(
-        #     "Executing Cypher Query to Neo4j",
-        #     extra={
-        #         "query": query.query_statement,
-        #         "uri": self.driver._pool.address.host,
-        #     },
-        # )
-        pass
-
-    def log_record(self, record: Record):
-        # self.logger.debug(
-        #     "Gathered Query Results",
-        #     extra=dict(**record, uri=self.driver._pool.address.host),
-        # )
-        pass
+        if query.query_statement not in self.counts_by_query:
+            self.logger.info(
+                f"Executing Cypher Query to Neo4j: {query.query_statement}",
+                extra={"uri": self.driver._pool.address.host},
+            )
+            self.counts_by_query.add(query.query_statement)
 
     async def _execute_query(
         self,
@@ -126,7 +117,7 @@ class Neo4jDatabaseConnection:
         if log_result:
             statistics = neo4j_result.obtain_query_statistics()
             self.log_error_messages_from_statistics(statistics)
-            update_metrics_from_summary(statistics)
+            statistics.update_metrics_from_summary()
 
         return neo4j_result.records
 
