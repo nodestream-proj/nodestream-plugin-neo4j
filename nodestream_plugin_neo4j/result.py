@@ -110,8 +110,6 @@ class Neo4jWriteMetrics:
 class Neo4jQueryStatistics:
     """Consolidated statistics from both APOC metrics and query summary."""
 
-    query_type: str = "read"  # read, write, or rw
-
     # Timing metrics
     timing: Neo4jTimingMetrics = field(default_factory=Neo4jTimingMetrics)
 
@@ -132,9 +130,6 @@ class Neo4jQueryStatistics:
     ) -> "Neo4jQueryStatistics":
         """Create statistics from a query result and optional APOC response."""
         stats = cls()
-
-        # Set basic info
-        stats.query_type = summary.query_type
 
         # Set timing metrics
         stats.timing = Neo4jTimingMetrics(

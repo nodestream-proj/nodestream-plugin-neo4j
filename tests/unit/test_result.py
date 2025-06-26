@@ -94,7 +94,6 @@ def test_neo4j_write_metrics_custom_initialization():
 
 def test_neo4j_query_statistics_default_initialization():
     stats = Neo4jQueryStatistics()
-    assert_that(stats.query_type, equal_to("read"))
     assert_that(stats.timing, not_none())
     assert_that(stats.timing, is_(Neo4jTimingMetrics))
     assert_that(stats.write_metrics, not_none())
@@ -110,7 +109,6 @@ def test_neo4j_query_statistics_custom_initialization():
     write_metrics = Neo4jWriteMetrics(nodes_created=5, relationships_created=3)
 
     stats = Neo4jQueryStatistics(
-        query_type="write",
         timing=timing,
         write_metrics=write_metrics,
         is_apoc_query=True,
@@ -119,7 +117,6 @@ def test_neo4j_query_statistics_custom_initialization():
         error_messages=["error1", "error2"],
     )
 
-    assert_that(stats.query_type, equal_to("write"))
     assert_that(stats.timing, equal_to(timing))
     assert_that(stats.write_metrics, equal_to(write_metrics))
     assert_that(stats.is_apoc_query, equal_to(True))
@@ -131,7 +128,6 @@ def test_neo4j_query_statistics_custom_initialization():
 def test_neo4j_query_statistics_from_result_without_apoc():
     # Mock a ResultSummary
     mock_summary = Mock()
-    mock_summary.query_type = "write"
     mock_summary.result_available_after = 50
     mock_summary.result_consumed_after = 100
 
@@ -152,7 +148,6 @@ def test_neo4j_query_statistics_from_result_without_apoc():
 
     stats = Neo4jQueryStatistics.from_result(mock_summary)
 
-    assert_that(stats.query_type, equal_to("write"))
     assert_that(stats.timing.planning_time_ms, equal_to(50))
     assert_that(stats.timing.processing_time_ms, equal_to(100))
     assert_that(stats.timing.total_time_ms, equal_to(150))
@@ -191,7 +186,6 @@ MOCK_APOC_RECORD = [
 def test_neo4j_query_statistics_from_result_with_apoc():
     # Mock a ResultSummary
     mock_summary = Mock()
-    mock_summary.query_type = "write"
     mock_summary.result_available_after = 50
     mock_summary.result_consumed_after = 100
 
@@ -218,7 +212,6 @@ def test_neo4j_query_statistics_from_result_with_apoc():
 
     stats = Neo4jQueryStatistics.from_result(mock_summary, apoc_response)
 
-    assert_that(stats.query_type, equal_to("write"))
     assert_that(stats.timing.planning_time_ms, equal_to(50))
     assert_that(stats.timing.processing_time_ms, equal_to(100))
     assert_that(stats.timing.total_time_ms, equal_to(150))
@@ -241,7 +234,6 @@ def test_neo4j_query_statistics_from_result_with_apoc():
 def test_neo4j_query_statistics_from_result_with_apoc_no_update_stats():
     # Mock a ResultSummary
     mock_summary = Mock()
-    mock_summary.query_type = "read"
     mock_summary.result_available_after = 25
     mock_summary.result_consumed_after = 75
 
@@ -317,7 +309,6 @@ def test_neo4j_result_obtain_query_statistics_non_apoc():
     result = Neo4jResult(query, mock_result)
     stats = result.obtain_query_statistics()
 
-    assert_that(stats.query_type, equal_to("read"))
     assert_that(stats.timing.planning_time_ms, equal_to(30))
     assert_that(stats.timing.processing_time_ms, equal_to(70))
     assert_that(stats.timing.total_time_ms, equal_to(100))
@@ -354,7 +345,6 @@ def test_neo4j_result_obtain_query_statistics_apoc_query(mocker):
     result = Neo4jResult(query, mock_result)
     stats = result.obtain_query_statistics()
 
-    assert_that(stats.query_type, equal_to("write"))
     assert_that(stats.timing.apoc_time_ms, equal_to(1000))
     assert_that(stats.is_apoc_query, equal_to(True))
     assert_that(stats.write_metrics.nodes_created, equal_to(5))
@@ -382,7 +372,6 @@ def test_neo4j_result_obtain_query_statistics_apoc_query_no_records():
     stats = result.obtain_query_statistics()
 
     # Should still work, just without APOC response
-    assert_that(stats.query_type, equal_to("write"))
     assert_that(stats.is_apoc_query, equal_to(False))  # No APOC response processed
 
 
