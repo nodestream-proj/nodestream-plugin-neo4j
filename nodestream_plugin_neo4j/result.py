@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from logging import getLogger
 from typing import List, Optional
 
 from dacite import from_dict
