@@ -9,16 +9,24 @@ from .query import ApocBatchResponse, Query
 
 # Timing metrics
 PLANNING_TIME = Metric(
-    "neo4j_query_planning_time_ms", "Time taken to plan the Neo4j query.", accumulator=True,
+    "neo4j_query_planning_time_ms",
+    "Time taken to plan the Neo4j query.",
+    accumulator=True,
 )
 PROCESSING_TIME = Metric(
-    "neo4j_query_processing_time_ms", "Time taken to execute the Neo4j query.", accumulator=True,
+    "neo4j_query_processing_time_ms",
+    "Time taken to execute the Neo4j query.",
+    accumulator=True,
 )
 TOTAL_TIME = Metric(
-    "neo4j_query_total_time_ms", "Total time taken to execute the Neo4j query.", accumulator=True,
+    "neo4j_query_total_time_ms",
+    "Total time taken to execute the Neo4j query.",
+    accumulator=True,
 )
 APOC_TIME = Metric(
-    "neo4j_query_apoc_time_ms", "Time taken to execute the Neo4j query using APOC.", accumulator=True,
+    "neo4j_query_apoc_time_ms",
+    "Time taken to execute the Neo4j query using APOC.",
+    accumulator=True,
 )
 
 # Write metrics
@@ -80,7 +88,9 @@ INDEXES_REMOVED = Metric(
 
 # APOC specific metrics
 WAS_TERMINATED = Metric(
-    "neo4j_query_was_terminated", "Whether the Neo4j query was terminated.", accumulator=True,
+    "neo4j_query_was_terminated",
+    "Whether the Neo4j query was terminated.",
+    accumulator=True,
 )
 RETRIES = Metric(
     "neo4j_query_retries", "Number of retries in the Neo4j query.", accumulator=True
