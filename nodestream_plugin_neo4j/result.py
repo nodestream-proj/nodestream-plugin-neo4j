@@ -9,73 +9,88 @@ from .query import ApocBatchResponse, Query
 
 # Timing metrics
 PLANNING_TIME = Metric(
-    "neo4j_query_planning_time_ms", "Time taken to plan the Neo4j query."
+    "neo4j_query_planning_time_ms", "Time taken to plan the Neo4j query.", accumulator=True,
 )
 PROCESSING_TIME = Metric(
-    "neo4j_query_processing_time_ms", "Time taken to execute the Neo4j query."
+    "neo4j_query_processing_time_ms", "Time taken to execute the Neo4j query.", accumulator=True,
 )
 TOTAL_TIME = Metric(
-    "neo4j_query_total_time_ms", "Total time taken to execute the Neo4j query."
+    "neo4j_query_total_time_ms", "Total time taken to execute the Neo4j query.", accumulator=True,
 )
 APOC_TIME = Metric(
-    "neo4j_query_apoc_time_ms", "Time taken to execute the Neo4j query using APOC."
+    "neo4j_query_apoc_time_ms", "Time taken to execute the Neo4j query using APOC.", accumulator=True,
 )
 
 # Write metrics
 NODES_CREATED = Metric(
     "neo4j_query_write_metrics_nodes_created",
     "Number of nodes created in the Neo4j query.",
+    accumulator=True,
 )
 NODES_DELETED = Metric(
     "neo4j_query_write_metrics_nodes_deleted",
     "Number of nodes deleted in the Neo4j query.",
+    accumulator=True,
 )
 RELATIONSHIPS_CREATED = Metric(
     "neo4j_query_write_metrics_relationships_created",
     "Number of relationships created in the Neo4j query.",
+    accumulator=True,
 )
 RELATIONSHIPS_DELETED = Metric(
     "neo4j_query_write_metrics_relationships_deleted",
     "Number of relationships deleted in the Neo4j query.",
+    accumulator=True,
 )
 PROPERTIES_SET = Metric(
     "neo4j_query_write_metrics_properties_set",
     "Number of properties set in the Neo4j query.",
+    accumulator=True,
 )
 LABELS_ADDED = Metric(
     "neo4j_query_write_metrics_labels_added",
     "Number of labels added in the Neo4j query.",
+    accumulator=True,
 )
 LABELS_REMOVED = Metric(
     "neo4j_query_write_metrics_labels_removed",
     "Number of labels removed in the Neo4j query.",
+    accumulator=True,
 )
 CONSTRAINTS_ADDED = Metric(
     "neo4j_query_write_metrics_constraints_added",
     "Number of constraints added in the Neo4j query.",
+    accumulator=True,
 )
 CONSTRAINTS_REMOVED = Metric(
     "neo4j_query_write_metrics_constraints_removed",
     "Number of constraints removed in the Neo4j query.",
+    accumulator=True,
 )
 INDEXES_ADDED = Metric(
     "neo4j_query_write_metrics_indexes_added",
     "Number of indexes added in the Neo4j query.",
+    accumulator=True,
 )
 INDEXES_REMOVED = Metric(
     "neo4j_query_write_metrics_indexes_removed",
     "Number of indexes removed in the Neo4j query.",
+    accumulator=True,
 )
 
 # APOC specific metrics
 WAS_TERMINATED = Metric(
-    "neo4j_query_was_terminated", "Whether the Neo4j query was terminated."
+    "neo4j_query_was_terminated", "Whether the Neo4j query was terminated.", accumulator=True,
 )
-RETRIES = Metric("neo4j_query_retries", "Number of retries in the Neo4j query.")
+RETRIES = Metric(
+    "neo4j_query_retries", "Number of retries in the Neo4j query.", accumulator=True
+)
 
 # Error tracking
 ERROR_MESSAGES = Metric(
-    "neo4j_query_error_messages", "Number of error messages in the Neo4j query."
+    "neo4j_query_error_messages",
+    "Number of error messages in the Neo4j query.",
+    accumulator=True,
 )
 
 
