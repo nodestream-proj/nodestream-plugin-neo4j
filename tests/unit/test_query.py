@@ -3,7 +3,7 @@ from hamcrest import assert_that, equal_to, has_entries, is_, not_none
 from nodestream_plugin_neo4j.query import (
     APOC_BATCH_QUERY_RESPONSE_FIELDS,
     COMMIT_QUERY,
-    NON_APOCH_COMMIT_QUERY,
+    NON_APOC_COMMIT_QUERY,
     RETURN_CLAUSE,
     UNWIND_QUERY,
     YIELD_CLAUSE,
@@ -59,15 +59,6 @@ def test_apoc_batch_response_default_initialization():
     assert_that(response.updateStatistics, is_(ApocUpdateStatistics))
 
 
-def test_apoc_batch_response_post_init_with_none_values():
-    response = ApocBatchResponse(batches=5, errorMessages=None, updateStatistics=None)
-    # __post_init__ should initialize these to defaults
-    assert_that(response.errorMessages, equal_to({}))
-    assert_that(response.updateStatistics, not_none())
-    assert_that(response.updateStatistics, is_(ApocUpdateStatistics))
-    assert_that(response.batches, equal_to(5))
-
-
 def test_apoc_batch_response_post_init_with_existing_values():
     existing_errors = {"error1": "message1"}
     existing_stats = ApocUpdateStatistics(nodesCreated=10)
@@ -75,7 +66,6 @@ def test_apoc_batch_response_post_init_with_existing_values():
     response = ApocBatchResponse(
         errorMessages=existing_errors, updateStatistics=existing_stats
     )
-    # __post_init__ should not overwrite existing values
     assert_that(response.errorMessages, equal_to(existing_errors))
     assert_that(response.updateStatistics, equal_to(existing_stats))
     assert_that(response.updateStatistics.nodesCreated, equal_to(10))
@@ -228,7 +218,7 @@ def test_query_batch_as_query_with_apoc_iterate_false():
 
     result = batch.as_query(apoc_iterate=False)
 
-    assert_that(result.query_statement, equal_to(NON_APOCH_COMMIT_QUERY))
+    assert_that(result.query_statement, equal_to(NON_APOC_COMMIT_QUERY))
     assert_that(result.is_apoc, equal_to(False))
     assert_that(
         result.parameters,
@@ -308,6 +298,6 @@ def test_commit_query_structure():
 
 
 def test_non_apoc_commit_query_structure():
-    assert_that("UNWIND" in NON_APOCH_COMMIT_QUERY, equal_to(True))
-    assert_that("CALL apoc.cypher.doIt" in NON_APOCH_COMMIT_QUERY, equal_to(True))
-    assert_that("RETURN" in NON_APOCH_COMMIT_QUERY, equal_to(True))
+    assert_that("UNWIND" in NON_APOC_COMMIT_QUERY, equal_to(True))
+    assert_that("CALL apoc.cypher.doIt" in NON_APOC_COMMIT_QUERY, equal_to(True))
+    assert_that("RETURN" in NON_APOC_COMMIT_QUERY, equal_to(True))

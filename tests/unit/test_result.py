@@ -366,6 +366,7 @@ def test_update_metrics_from_summary(mocker):
         constraints_added=2,
         constraints_removed=1,
         indexes_added=3,
+        indexes_removed=1,
     )
 
     stats = Neo4jQueryStatistics(
@@ -394,13 +395,14 @@ def test_update_metrics_from_summary(mocker):
         mocker.call(CONSTRAINTS_ADDED, 2),
         mocker.call(CONSTRAINTS_REMOVED, 1),
         mocker.call(INDEXES_ADDED, 3),
+        mocker.call(INDEXES_REMOVED, 1),
         mocker.call(WAS_TERMINATED, 1),  # True converted to int
         mocker.call(RETRIES, 2),
         mocker.call(ERROR_MESSAGES, 2),  # len(error_messages)
     ]
 
     mock_metrics.increment.assert_has_calls(expected_calls, any_order=True)
-    assert_that(mock_metrics.increment.call_count, equal_to(17))
+    assert_that(mock_metrics.increment.call_count, equal_to(18))
 
 
 def test_metric_constants_are_defined():

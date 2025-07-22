@@ -211,7 +211,7 @@ class Neo4jQueryStatistics:
         metric_updates: list[tuple[Metric, int]] = [
             (PLANNING_TIME, self.timing.planning_time_ms),
             (PROCESSING_TIME, self.timing.processing_time_ms),
-            (TOTAL_TIME, self.timing.total_time_ms + self.timing.processing_time_ms),
+            (TOTAL_TIME, self.timing.planning_time_ms + self.timing.processing_time_ms),
             (APOC_TIME, self.timing.apoc_time_ms),
             (NODES_CREATED, self.write_metrics.nodes_created),
             (NODES_DELETED, self.write_metrics.nodes_deleted),
@@ -229,7 +229,8 @@ class Neo4jQueryStatistics:
             (ERROR_MESSAGES, len(self.error_messages)),
         ]
 
-        metrics.increment(*metric_updates)
+        for metric, value in metric_updates:
+            metrics.increment(metric, value)
 
 
 class Neo4jResult:

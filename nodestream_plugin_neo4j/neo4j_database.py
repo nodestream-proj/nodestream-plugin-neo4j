@@ -119,8 +119,7 @@ class Neo4jDatabaseConnection:
             self.log_error_messages_from_statistics(statistics)
             statistics.update_metrics_from_summary()
 
-        for record in neo4j_result.records:
-            yield record
+        return neo4j_result.records
 
     def log_error_messages_from_statistics(self, statistics: Neo4jQueryStatistics):
         for error in statistics.error_messages:
