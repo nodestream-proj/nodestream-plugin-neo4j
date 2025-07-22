@@ -82,7 +82,7 @@ class Neo4jDatabaseConnection:
         self.max_retry_attempts = max_retry_attempts
         self.retry_factor = retry_factor
         self._driver = None
-        self.counts_by_query: set[Query] = set()
+        self.query_set: set[Query] = set()
 
     def acquire_driver(self) -> AsyncDriver:
         self._driver = self.driver_factory()
@@ -94,12 +94,15 @@ class Neo4jDatabaseConnection:
         return self._driver
 
     def log_query_start(self, query: Query):
-        if query.query_statement not in self.counts_by_query:
+        if query.query_statement not in self.query_set:
             self.logger.info(
-                f"Executing Cypher Query to Neo4j: {query.query_statement}",
-                extra={"uri": self.driver._pool.address.host},
+                "Executing Cypher Query to Neo4j.",
+                extra={
+                    "query": query.query_statement,
+                    "uri": self.driver._pool.address.host,
+                },
             )
-            self.counts_by_query.add(query.query_statement)
+            self.query_set.add(query.query_statement)
 
     async def _execute_query(
         self,
@@ -123,7 +126,7 @@ class Neo4jDatabaseConnection:
 
     def log_error_messages_from_statistics(self, statistics: Neo4jQueryStatistics):
         for error in statistics.error_messages:
-            self.logger.error("Query Error Occurred: %s", error)
+            self.logger.error("Query Error Occurred.", extra={"error": error})
 
     async def execute(
         self,
@@ -139,7 +142,8 @@ class Neo4jDatabaseConnection:
                 return await self._execute_query(query, log_result, routing_)
             except RETRYABLE_EXCEPTIONS as e:
                 self.logger.warning(
-                    f"Error executing query, retrying. Attempt {attempts + 1}",
+                    "Error executing query, retrying. Attempt %s",
+                    attempts,
                     exc_info=e,
                 )
                 await asyncio.sleep(self.retry_factor * attempts)
