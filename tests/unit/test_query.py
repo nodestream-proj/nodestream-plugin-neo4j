@@ -272,7 +272,21 @@ def test_apoc_batch_query_response_fields():
         "wasTerminated",
         "updateStatistics",
     ]
-    assert_that(set(APOC_BATCH_QUERY_RESPONSE_FIELDS), equal_to(set(expected_fields)))
+    assert_that(
+        APOC_BATCH_QUERY_RESPONSE_FIELDS,
+        contains_inanyorder(
+            "batches",
+            "total",
+            "timeTaken",
+            "committedOperations",
+            "failedOperations",
+            "failedBatches",
+            "retries",
+            "errorMessages",
+            "wasTerminated",
+            "updateStatistics",
+        ),
+    )
 
 
 def test_unwind_query():
