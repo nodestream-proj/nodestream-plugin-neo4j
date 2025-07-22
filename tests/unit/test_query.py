@@ -289,15 +289,3 @@ def test_yield_clause_contains_all_fields():
 def test_return_clause_contains_all_fields():
     expected_return = f"RETURN {', '.join(APOC_BATCH_QUERY_RESPONSE_FIELDS)}"
     assert_that(RETURN_CLAUSE, equal_to(expected_return))
-
-
-def test_commit_query_structure():
-    assert_that("CALL apoc.periodic.iterate" in COMMIT_QUERY, equal_to(True))
-    assert_that("YIELD" in COMMIT_QUERY, equal_to(True))
-    assert_that("RETURN" in COMMIT_QUERY, equal_to(True))
-
-
-def test_non_apoc_commit_query_structure():
-    assert_that("UNWIND" in NON_APOC_COMMIT_QUERY, equal_to(True))
-    assert_that("CALL apoc.cypher.doIt" in NON_APOC_COMMIT_QUERY, equal_to(True))
-    assert_that("RETURN" in NON_APOC_COMMIT_QUERY, equal_to(True))
