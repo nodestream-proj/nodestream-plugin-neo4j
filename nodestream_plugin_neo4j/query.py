@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -26,15 +26,9 @@ class ApocBatchResponse:
     failedOperations: int = 0  # Number of operations that failed
     failedBatches: int = 0  # Number of batches that failed
     retries: int = 0  # Number of retries performed
-    errorMessages: dict[str, Any] = None  # Map of error messages
+    errorMessages: dict[str, Any] = field(default_factory=dict)  # Map of error messages
     wasTerminated: bool = False  # Whether the operation was terminated
-    updateStatistics: ApocUpdateStatistics = None  # Statistics about updates
-
-    def __post_init__(self):
-        if self.errorMessages is None:
-            self.errorMessages = {}
-        if self.updateStatistics is None:
-            self.updateStatistics = ApocUpdateStatistics()
+    updateStatistics: ApocUpdateStatistics = field(default_factory=ApocUpdateStatistics)
 
 
 # Get fields from ApocBatchResponse dataclass
@@ -58,7 +52,7 @@ CALL apoc.periodic.iterate(
 {RETURN_CLAUSE}
 """
 
-NON_APOCH_COMMIT_QUERY = """
+NON_APOC_COMMIT_QUERY = """
 UNWIND $iterate_params.batched_parameter_sets AS param
 CALL apoc.cypher.doIt($batched_query, {params: param})
 YIELD value
@@ -112,7 +106,7 @@ class QueryBatch:
         retries_per_chunk: int = 3,
     ) -> Query:
         return Query(
-            {True: COMMIT_QUERY, False: NON_APOCH_COMMIT_QUERY}[apoc_iterate],
+            {True: COMMIT_QUERY, False: NON_APOC_COMMIT_QUERY}[apoc_iterate],
             {
                 "iterate_params": {
                     "batched_parameter_sets": self.batched_parameter_sets

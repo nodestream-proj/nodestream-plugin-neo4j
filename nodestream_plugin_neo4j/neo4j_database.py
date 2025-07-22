@@ -106,7 +106,7 @@ class Neo4jDatabaseConnection:
         query: Query,
         log_result: bool = False,
         routing_=RoutingControl.WRITE,
-    ) -> Record:
+    ) -> Iterable[Record]:
         result: EagerResult = await self.driver.execute_query(
             query.query_statement,
             query.parameters,
@@ -119,11 +119,12 @@ class Neo4jDatabaseConnection:
             self.log_error_messages_from_statistics(statistics)
             statistics.update_metrics_from_summary()
 
-        return neo4j_result.records
+        for record in neo4j_result.records:
+            yield record
 
     def log_error_messages_from_statistics(self, statistics: Neo4jQueryStatistics):
         for error in statistics.error_messages:
-            self.logger.error(f"Query Errors Occured: {error}")
+            self.logger.error("Query Error Occurred: %s", error)
 
     async def execute(
         self,

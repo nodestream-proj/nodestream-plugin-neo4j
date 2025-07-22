@@ -207,34 +207,29 @@ class Neo4jQueryStatistics:
 
     def update_metrics_from_summary(self):
         metrics = Metrics.get()
-        # Timing metrics
-        metrics.increment(PLANNING_TIME, self.timing.planning_time_ms)
-        metrics.increment(PROCESSING_TIME, self.timing.processing_time_ms)
-        metrics.increment(TOTAL_TIME, self.timing.total_time_ms)
-        metrics.increment(APOC_TIME, self.timing.apoc_time_ms)
 
-        # Write metrics
-        metrics.increment(NODES_CREATED, self.write_metrics.nodes_created)
-        metrics.increment(NODES_DELETED, self.write_metrics.nodes_deleted)
-        metrics.increment(
-            RELATIONSHIPS_CREATED, self.write_metrics.relationships_created
-        )
-        metrics.increment(
-            RELATIONSHIPS_DELETED, self.write_metrics.relationships_deleted
-        )
-        metrics.increment(PROPERTIES_SET, self.write_metrics.properties_set)
-        metrics.increment(LABELS_ADDED, self.write_metrics.labels_added)
-        metrics.increment(LABELS_REMOVED, self.write_metrics.labels_removed)
-        metrics.increment(CONSTRAINTS_ADDED, self.write_metrics.constraints_added)
-        metrics.increment(CONSTRAINTS_REMOVED, self.write_metrics.constraints_removed)
-        metrics.increment(INDEXES_ADDED, self.write_metrics.indexes_added)
+        metric_updates: list[tuple[Metric, int]] = [
+            (PLANNING_TIME, self.timing.planning_time_ms),
+            (PROCESSING_TIME, self.timing.processing_time_ms),
+            (TOTAL_TIME, self.timing.total_time_ms + self.timing.processing_time_ms),
+            (APOC_TIME, self.timing.apoc_time_ms),
+            (NODES_CREATED, self.write_metrics.nodes_created),
+            (NODES_DELETED, self.write_metrics.nodes_deleted),
+            (RELATIONSHIPS_CREATED, self.write_metrics.relationships_created),
+            (RELATIONSHIPS_DELETED, self.write_metrics.relationships_deleted),
+            (PROPERTIES_SET, self.write_metrics.properties_set),
+            (LABELS_ADDED, self.write_metrics.labels_added),
+            (LABELS_REMOVED, self.write_metrics.labels_removed),
+            (CONSTRAINTS_ADDED, self.write_metrics.constraints_added),
+            (CONSTRAINTS_REMOVED, self.write_metrics.constraints_removed),
+            (INDEXES_ADDED, self.write_metrics.indexes_added),
+            (INDEXES_REMOVED, self.write_metrics.indexes_removed),
+            (WAS_TERMINATED, int(self.was_terminated)),
+            (RETRIES, self.retries),
+            (ERROR_MESSAGES, len(self.error_messages)),
+        ]
 
-        # APOC specific metrics
-        metrics.increment(WAS_TERMINATED, int(self.was_terminated))
-        metrics.increment(RETRIES, self.retries)
-
-        # Error tracking
-        metrics.increment(ERROR_MESSAGES, len(self.error_messages))
+        metrics.increment(*metric_updates)
 
 
 class Neo4jResult:
