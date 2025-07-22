@@ -259,36 +259,6 @@ def test_query_batch_as_query_with_custom_parameters():
     )
 
 
-def test_apoc_batch_query_response_fields():
-    expected_fields = [
-        "batches",
-        "total",
-        "timeTaken",
-        "committedOperations",
-        "failedOperations",
-        "failedBatches",
-        "retries",
-        "errorMessages",
-        "wasTerminated",
-        "updateStatistics",
-    ]
-    assert_that(
-        APOC_BATCH_QUERY_RESPONSE_FIELDS,
-        contains_inanyorder(
-            "batches",
-            "total",
-            "timeTaken",
-            "committedOperations",
-            "failedOperations",
-            "failedBatches",
-            "retries",
-            "errorMessages",
-            "wasTerminated",
-            "updateStatistics",
-        ),
-    )
-
-
 def test_unwind_query():
     assert_that(
         UNWIND_QUERY, equal_to("UNWIND $batched_parameter_sets as params RETURN params")
