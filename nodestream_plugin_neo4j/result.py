@@ -187,7 +187,7 @@ class Neo4jQueryStatistics:
                 apoc_response.failedOperations
                 if apoc_response.committedOperations == 0
                 else 0
-            ) 
+            )
 
             # Set APOC timing if available
             if hasattr(apoc_response, "timeTaken"):

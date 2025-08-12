@@ -264,6 +264,7 @@ def test_unwind_query():
         UNWIND_QUERY, equal_to("UNWIND $batched_parameter_sets as params RETURN params")
     )
 
+
 def test_yield_clause_contains_all_fields():
     expected_yield = f"YIELD {', '.join(APOC_BATCH_QUERY_RESPONSE_FIELDS)}"
     assert_that(YIELD_CLAUSE, equal_to(expected_yield))
