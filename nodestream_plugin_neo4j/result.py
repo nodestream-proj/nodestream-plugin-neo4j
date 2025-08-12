@@ -85,6 +85,17 @@ INDEXES_REMOVED = Metric(
     "Number of indexes removed in the Neo4j query.",
     accumulate=True,
 )
+OPERATIONS_COMMITTED = Metric(
+    "neo4j_query_write_metrics_operations_committed",
+    "Number of operations committed in the Neo4j query.",
+    accumulate=True,
+)
+
+OPERATIONS_MISSING = Metric(
+    "neo4j_query_write_metrics_operations_missing",
+    "Number of operations missing in the Neo4j query.",
+    accumulate=True,
+)
 
 # APOC specific metrics
 WAS_TERMINATED = Metric(
@@ -129,6 +140,8 @@ class Neo4jWriteMetrics:
     constraints_removed: int = 0
     indexes_added: int = 0
     indexes_removed: int = 0
+    operations_committed: int = 0
+    operations_missing: int = 0
 
 
 @dataclass
@@ -167,6 +180,14 @@ class Neo4jQueryStatistics:
         if apoc_response:
             stats.was_terminated = apoc_response.wasTerminated
             stats.retries = apoc_response.retries
+            stats.write_metrics.operations_committed = apoc_response.committedOperations
+
+            # Operations are missing if there are no committed operations and only failed operations.
+            stats.write_metrics.operations_missing = (
+                apoc_response.failedOperations
+                if apoc_response.committedOperations == 0
+                else 0
+            ) 
 
             # Set APOC timing if available
             if hasattr(apoc_response, "timeTaken"):
@@ -186,6 +207,12 @@ class Neo4jQueryStatistics:
                     properties_set=apoc_response.updateStatistics.propertiesSet,
                     labels_added=apoc_response.updateStatistics.labelsAdded,
                     labels_removed=apoc_response.updateStatistics.labelsRemoved,
+                    operations_committed=apoc_response.committedOperations,
+                    operations_missing=(
+                        apoc_response.failedOperations
+                        if apoc_response.committedOperations == 0
+                        else 0
+                    ),
                 )
         else:
             # Set write metrics from query summary
@@ -224,6 +251,8 @@ class Neo4jQueryStatistics:
             (CONSTRAINTS_REMOVED, self.write_metrics.constraints_removed),
             (INDEXES_ADDED, self.write_metrics.indexes_added),
             (INDEXES_REMOVED, self.write_metrics.indexes_removed),
+            (OPERATIONS_COMMITTED, self.write_metrics.operations_committed),
+            (OPERATIONS_MISSING, self.write_metrics.operations_missing),
             (WAS_TERMINATED, int(self.was_terminated)),
             (RETRIES, self.retries),
             (ERROR_MESSAGES, len(self.error_messages)),
