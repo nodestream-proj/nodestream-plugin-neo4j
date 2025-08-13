@@ -126,7 +126,7 @@ class Neo4jDatabaseConnection:
 
     def log_error_messages_from_statistics(self, statistics: Neo4jQueryStatistics):
         for error in statistics.error_messages:
-            self.logger.error("Query Error Occurred.", extra={"error": error})
+            self.logger.info("Query Error Occurred.", extra={"error": error})
 
     async def execute(
         self,

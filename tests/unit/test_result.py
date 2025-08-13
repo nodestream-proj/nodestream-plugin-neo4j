@@ -14,6 +14,8 @@ from nodestream_plugin_neo4j.result import (
     LABELS_REMOVED,
     NODES_CREATED,
     NODES_DELETED,
+    OPERATIONS_COMMITTED,
+    OPERATIONS_MISSING,
     PLANNING_TIME,
     PROCESSING_TIME,
     PROPERTIES_SET,
@@ -63,6 +65,8 @@ def test_neo4j_write_metrics_default_initialization():
     assert_that(metrics.constraints_removed, equal_to(0))
     assert_that(metrics.indexes_added, equal_to(0))
     assert_that(metrics.indexes_removed, equal_to(0))
+    assert_that(metrics.operations_committed, equal_to(0))
+    assert_that(metrics.operations_missing, equal_to(0))
 
 
 def test_neo4j_write_metrics_custom_initialization():
@@ -78,6 +82,8 @@ def test_neo4j_write_metrics_custom_initialization():
         constraints_removed=1,
         indexes_added=3,
         indexes_removed=1,
+        operations_committed=7,
+        operations_missing=1,
     )
     assert_that(metrics.nodes_created, equal_to(5))
     assert_that(metrics.nodes_deleted, equal_to(2))
@@ -90,6 +96,8 @@ def test_neo4j_write_metrics_custom_initialization():
     assert_that(metrics.constraints_removed, equal_to(1))
     assert_that(metrics.indexes_added, equal_to(3))
     assert_that(metrics.indexes_removed, equal_to(1))
+    assert_that(metrics.operations_committed, equal_to(7))
+    assert_that(metrics.operations_missing, equal_to(1))
 
 
 def test_neo4j_query_statistics_default_initialization():
@@ -162,6 +170,10 @@ def test_neo4j_query_statistics_from_result_without_apoc():
     assert_that(stats.write_metrics.indexes_added, equal_to(3))
     assert_that(stats.write_metrics.indexes_removed, equal_to(1))
 
+    # Operations committed/missing should remain defaults for non-APOC
+    assert_that(stats.write_metrics.operations_committed, equal_to(0))
+    assert_that(stats.write_metrics.operations_missing, equal_to(0))
+
     assert_that(stats.was_terminated, equal_to(False))
     assert_that(stats.retries, equal_to(0))
     assert_that(stats.error_messages, empty())
@@ -203,6 +215,8 @@ def test_neo4j_query_statistics_from_result_with_apoc():
         wasTerminated=True,
         retries=2,
         errorMessages={"batch1": "error1", "batch2": "error2"},
+        committedOperations=13,
+        failedOperations=2,
         updateStatistics=apoc_update_stats,
     )
 
@@ -220,6 +234,8 @@ def test_neo4j_query_statistics_from_result_with_apoc():
     assert_that(stats.write_metrics.properties_set, equal_to(20))
     assert_that(stats.write_metrics.labels_added, equal_to(5))
     assert_that(stats.write_metrics.labels_removed, equal_to(2))
+    assert_that(stats.write_metrics.operations_committed, equal_to(13))
+    assert_that(stats.write_metrics.operations_missing, equal_to(0))
 
     assert_that(stats.was_terminated, equal_to(True))
     assert_that(stats.retries, equal_to(2))
@@ -240,6 +256,8 @@ def test_neo4j_query_statistics_from_result_with_apoc_no_update_stats():
         wasTerminated=False,
         retries=1,
         errorMessages={},
+        committedOperations=0,
+        failedOperations=4,
         updateStatistics=None,
     )
 
@@ -249,6 +267,10 @@ def test_neo4j_query_statistics_from_result_with_apoc_no_update_stats():
     assert_that(stats.retries, equal_to(1))
     assert_that(stats.timing.apoc_time_ms, equal_to(1500))
     assert_that(stats.error_messages, empty())
+
+    # Operations committed/missing inferred from APOC response
+    assert_that(stats.write_metrics.operations_committed, equal_to(0))
+    assert_that(stats.write_metrics.operations_missing, equal_to(4))
 
     # Write metrics should be defaults since no update statistics
     assert_that(stats.write_metrics.nodes_created, equal_to(0))
@@ -367,6 +389,8 @@ def test_update_metrics_from_summary(mocker):
         constraints_removed=1,
         indexes_added=3,
         indexes_removed=1,
+        operations_committed=7,
+        operations_missing=1,
     )
 
     stats = Neo4jQueryStatistics(
@@ -396,13 +420,15 @@ def test_update_metrics_from_summary(mocker):
         mocker.call(CONSTRAINTS_REMOVED, 1),
         mocker.call(INDEXES_ADDED, 3),
         mocker.call(INDEXES_REMOVED, 1),
+        mocker.call(OPERATIONS_COMMITTED, 7),
+        mocker.call(OPERATIONS_MISSING, 1),
         mocker.call(WAS_TERMINATED, 1),  # True converted to int
         mocker.call(RETRIES, 2),
         mocker.call(ERROR_MESSAGES, 2),  # len(error_messages)
     ]
 
     mock_metrics.increment.assert_has_calls(expected_calls, any_order=True)
-    assert_that(mock_metrics.increment.call_count, equal_to(18))
+    assert_that(mock_metrics.increment.call_count, equal_to(20))
 
 
 def test_metric_constants_are_defined():
@@ -423,6 +449,8 @@ def test_metric_constants_are_defined():
         CONSTRAINTS_REMOVED,
         INDEXES_ADDED,
         INDEXES_REMOVED,
+        OPERATIONS_COMMITTED,
+        OPERATIONS_MISSING,
         WAS_TERMINATED,
         RETRIES,
         ERROR_MESSAGES,
