@@ -50,7 +50,7 @@ async def test_execute_relationship_key_part_renamed(migrator):
     )
     await migrator.execute_operation(operation)
     expected_query = Query.from_statement(
-        f":auto MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WITH r CALL {{ WITH r SET r.`new_key` = r.`old_key` REMOVE r.`old_key` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
+        f"MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WITH r CALL {{ WITH r SET r.`new_key` = r.`old_key` REMOVE r.`old_key` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
     )
     assert_that(migrator, ran_query(expected_query))
 
@@ -64,7 +64,7 @@ async def test_execute_relationship_property_renamed(migrator):
     )
     await migrator.execute_operation(operation)
     expected_query = Query.from_statement(
-        f":auto MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WITH r CALL {{ WITH r SET r.`new_prop` = r.`old_prop` REMOVE r.`old_prop` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
+        f"MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WITH r CALL {{ WITH r SET r.`new_prop` = r.`old_prop` REMOVE r.`old_prop` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
     )
     assert_that(migrator, ran_query(expected_query))
 
@@ -76,7 +76,7 @@ async def test_execute_relationship_key_extended(migrator):
     )
     await migrator.execute_operation(operation)
     query = Query(
-        f":auto MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WHERE r.`key` IS NULL WITH r, $value AS value CALL {{ WITH r, value SET r.`key` = coalesce(r.`key`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
+        f"MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WHERE r.`key` IS NULL WITH r, $value AS value CALL {{ WITH r, value SET r.`key` = coalesce(r.`key`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
         parameters={"value": "foo"},
     )
     assert_that(migrator, ran_query(query))
@@ -89,7 +89,7 @@ async def test_execute_relationship_property_added(migrator):
     )
     await migrator.execute_operation(operation)
     expected_query = Query(
-        f":auto MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WHERE r.`prop` IS NULL WITH r, $value AS value CALL {{ WITH r, value SET r.`prop` = coalesce(r.`prop`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
+        f"MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WHERE r.`prop` IS NULL WITH r, $value AS value CALL {{ WITH r, value SET r.`prop` = coalesce(r.`prop`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
         parameters={"value": "foo"},
     )
     assert_that(migrator, ran_query(expected_query))
@@ -102,7 +102,7 @@ async def test_execute_relationship_property_dropped(migrator):
     )
     await migrator.execute_operation(operation)
     query = Query.from_statement(
-        f":auto MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WITH r CALL {{ WITH r REMOVE r.`prop` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
+        f"MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WITH r CALL {{ WITH r REMOVE r.`prop` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
     )
     assert_that(migrator, ran_query(query))
 
@@ -112,7 +112,7 @@ async def test_execute_relationship_type_renamed(migrator):
     operation = RenameRelationshipType(old_type="OLD_TYPE", new_type="NEW_TYPE")
     await migrator.execute_operation(operation)
     expected_query = Query.from_statement(
-        f":auto MATCH (n)-[r:`OLD_TYPE`]->(m) WITH n, r, m CALL {{ WITH n, r, m CREATE (n)-[r2:`NEW_TYPE`]->(m) SET r2 += r WITH r DELETE r }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
+        f"MATCH (n)-[r:`OLD_TYPE`]->(m) WITH n, r, m CALL {{ WITH n, r, m CREATE (n)-[r2:`NEW_TYPE`]->(m) SET r2 += r WITH r DELETE r }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
     )
     assert_that(migrator, ran_query(expected_query))
 
@@ -192,7 +192,7 @@ async def test_rename_node_property(migrator):
     )
     await migrator.execute_operation(operation)
     query = Query.from_statement(
-        f":auto MATCH (n:`NodeType`) WITH n CALL {{ WITH n SET n.`new_prop` = n.`old_prop` REMOVE n.`old_prop` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
+        f"MATCH (n:`NodeType`) WITH n CALL {{ WITH n SET n.`new_prop` = n.`old_prop` REMOVE n.`old_prop` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
     )
     assert_that(migrator, ran_query(query))
 
@@ -202,7 +202,7 @@ async def test_rename_node_type(migrator):
     operation = RenameNodeType(old_type="OLD_TYPE", new_type="NEW_TYPE")
     await migrator.execute_operation(operation)
     expected_query = Query.from_statement(
-        f":auto MATCH (n:`OLD_TYPE`) WITH n CALL {{ WITH n SET n:`NEW_TYPE` REMOVE n:`OLD_TYPE` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
+        f"MATCH (n:`OLD_TYPE`) WITH n CALL {{ WITH n SET n:`NEW_TYPE` REMOVE n:`OLD_TYPE` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
     )
     assert_that(migrator, ran_query(expected_query))
 
@@ -239,7 +239,7 @@ async def test_add_node_property(migrator):
     )
     await migrator.execute_operation(operation)
     expected_query = Query.from_statement(
-        f":auto MATCH (n:`NodeType`) WHERE n.`prop` IS NULL WITH n, $value AS value CALL {{ WITH n, value SET n.`prop` = coalesce(n.`prop`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
+        f"MATCH (n:`NodeType`) WHERE n.`prop` IS NULL WITH n, $value AS value CALL {{ WITH n, value SET n.`prop` = coalesce(n.`prop`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
         value="foo",
     )
     assert_that(migrator, ran_query(expected_query))
@@ -250,7 +250,7 @@ async def test_drop_node_property(migrator):
     operation = DropNodeProperty(property_name="prop", node_type="NodeType")
     await migrator.execute_operation(operation)
     query = Query.from_statement(
-        f":auto MATCH (n:`NodeType`) WITH n CALL {{ WITH n REMOVE n.`prop` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
+        f"MATCH (n:`NodeType`) WITH n CALL {{ WITH n REMOVE n.`prop` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
     )
     assert_that(migrator, ran_query(query))
 
@@ -262,7 +262,7 @@ async def test_node_key_extended_with_default(migrator):
     )
     await migrator.execute_operation(operation)
     expected_query = Query.from_statement(
-        f":auto MATCH (n:`NodeType`) WHERE n.`key` IS NULL WITH n, $value AS value CALL {{ WITH n, value SET n.`key` = coalesce(n.`key`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
+        f"MATCH (n:`NodeType`) WHERE n.`key` IS NULL WITH n, $value AS value CALL {{ WITH n, value SET n.`key` = coalesce(n.`key`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
         value="foo",
     )
     assert_that(migrator, ran_query(expected_query))
@@ -278,7 +278,7 @@ async def test_node_key_renamed(migrator, mocker):
     assert_that(
         migrator,
         (
-            f":auto MATCH (n:`NodeType`) WITH n CALL {{ WITH n SET n.`key` = n.`foo` REMOVE n.`foo` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
+            f"MATCH (n:`NodeType`) WITH n CALL {{ WITH n SET n.`key` = n.`foo` REMOVE n.`foo` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
         ),
     )
 
@@ -293,6 +293,6 @@ async def test_node_key_renamed_idempotent_when_old_missing(migrator, mocker):
     # Should not raise and should still perform the rename in batched mode
     await migrator.execute_operation(operation)
     expected = Query.from_statement(
-        f":auto MATCH (n:`NodeType`) WITH n CALL {{ WITH n SET n.`key` = n.`foo` REMOVE n.`foo` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
+        f"MATCH (n:`NodeType`) WITH n CALL {{ WITH n SET n.`key` = n.`foo` REMOVE n.`foo` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
     )
     assert_that(migrator, ran_query(expected))

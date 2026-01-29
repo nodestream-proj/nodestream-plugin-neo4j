@@ -61,14 +61,14 @@ INDEMPOTENT_DROP_INDEX_FORMAT = "DROP INDEX {index_name} IF EXISTS"
 INDEMPOTENT_DROP_CONSTRAINT = "DROP CONSTRAINT {constraint_name} IF EXISTS"
 
 SET_NODE_PROPERTY_FORMAT = (
-    ":auto MATCH (n:`{node_type}`) "
+    "MATCH (n:`{node_type}`) "
     "WHERE n.`{property_name}` IS NULL "
     "WITH n, $value AS value "
     "CALL {{ WITH n, value SET n.`{property_name}` = coalesce(n.`{property_name}`, $value) }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 SET_RELATIONSHIP_PROPERTY_FORMAT = (
-    ":auto MATCH ()-[r:`{relationship_type}`]->() "
+    "MATCH ()-[r:`{relationship_type}`]->() "
     "WHERE r.`{property_name}` IS NULL "
     "WITH r, $value AS value "
     "CALL {{ WITH r, value SET r.`{property_name}` = coalesce(r.`{property_name}`, $value) }} "
@@ -83,13 +83,13 @@ NODE_FIELD_INDEX_QUERY_FORMAT = (
 REL_FIELD_INDEX_QUERY_FORMAT = "CREATE INDEX {constraint_name} IF NOT EXISTS FOR ()-[r:`{type}`]-() ON (r.`{field}`)"
 
 RENAME_NODE_PROPERTY_FORMAT = (
-    ":auto MATCH (n:`{node_type}`) "
+    "MATCH (n:`{node_type}`) "
     "WITH n "
     "CALL {{ WITH n SET n.`{new_property_name}` = n.`{old_property_name}` REMOVE n.`{old_property_name}` }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 RENAME_RELATIONSHIP_PROPERTY_FORMAT = (
-    ":auto MATCH ()-[r:`{relationship_type}`]->() "
+    "MATCH ()-[r:`{relationship_type}`]->() "
     "WITH r "
     "CALL {{ WITH r SET r.`{new_property_name}` = r.`{old_property_name}` REMOVE r.`{old_property_name}` }} "
     "IN TRANSACTIONS OF {batch} ROWS"
@@ -99,26 +99,26 @@ GET_PROPERTIES_FOR_CONSTRAINT_QUERY = "SHOW CONSTRAINTS YIELD name, properties W
 GET_INDEXES_BY_TYPE_QUERY = "SHOW INDEXES YIELD properties, entityType, labelsOrTypes, owningConstraint WHERE entityType = $entity_type and labelsOrTypes = [$object_type] and owningConstraint is null RETURN properties"
 
 RENAME_NODE_TYPE = (
-    ":auto MATCH (n:`{old_type}`) "
+    "MATCH (n:`{old_type}`) "
     "WITH n "
     "CALL {{ WITH n SET n:`{new_type}` REMOVE n:`{old_type}` }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 RENAME_REL_TYPE = (
-    ":auto MATCH (n)-[r:`{old_type}`]->(m) "
+    "MATCH (n)-[r:`{old_type}`]->(m) "
     "WITH n, r, m "
     "CALL {{ WITH n, r, m CREATE (n)-[r2:`{new_type}`]->(m) SET r2 += r WITH r DELETE r }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 
 DROP_REL_PROPERTY_FORMAT = (
-    ":auto MATCH ()-[r:`{relationship_type}`]->() "
+    "MATCH ()-[r:`{relationship_type}`]->() "
     "WITH r "
     "CALL {{ WITH r REMOVE r.`{property_name}` }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 DROP_NODE_PROPERTY_FORMAT = (
-    ":auto MATCH (n:`{node_type}`) "
+    "MATCH (n:`{node_type}`) "
     "WITH n "
     "CALL {{ WITH n REMOVE n.`{property_name}` }} "
     "IN TRANSACTIONS OF {batch} ROWS"
