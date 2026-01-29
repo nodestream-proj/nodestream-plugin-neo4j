@@ -54,14 +54,29 @@ RELEASE_LOCK_QUERY = Query.from_statement(
 LIST_MIGRATIONS_QUERY = "MATCH (m:__NodestreamMigration__) RETURN m.name as name"
 MARK_MIGRATION_AS_EXECUTED_QUERY = "MERGE (:__NodestreamMigration__ {name: $name})"
 
-DROP_ALL_NODES_OF_TYPE_FORMAT = "MATCH (n:`{type}`) DETACH DELETE n"
-DROP_ALL_RELATIONSHIPS_OF_TYPE_FORMAT = "MATCH ()-[r:`{type}`]->() DELETE r"
+DROP_ALL_NODES_OF_TYPE_FORMAT = "MATCH (n:`{type}`) WITH n CALL {{ WITH n DETACH DELETE n }} IN TRANSACTIONS OF {batch} ROWS"
+DROP_ALL_RELATIONSHIPS_OF_TYPE_FORMAT = "MATCH ()-[r:`{type}`]->() WITH r CALL {{ WITH r DELETE r }} IN TRANSACTIONS OF {batch} ROWS"
 
 INDEMPOTENT_DROP_INDEX_FORMAT = "DROP INDEX {index_name} IF EXISTS"
 INDEMPOTENT_DROP_CONSTRAINT = "DROP CONSTRAINT {constraint_name} IF EXISTS"
 
-SET_NODE_PROPERTY_FORMAT = "MATCH (n:`{node_type}`) SET n.`{property_name}` = coalesce(n.`{property_name}`, $value)"
-SET_RELATIONSHIP_PROPERTY_FORMAT = "MATCH ()-[r:`{relationship_type}`]->() SET r.`{property_name}` = coalesce(r.`{property_name}`, $value)"
+# Default batch size for IN TRANSACTIONS
+DEFAULT_TRANSACTION_BATCH_SIZE = 10000
+
+SET_NODE_PROPERTY_FORMAT = (
+    "MATCH (n:`{node_type}`) "
+    "WHERE n.`{property_name}` IS NULL "
+    "WITH n, $value AS value "
+    "CALL {{ WITH n, value SET n.`{property_name}` = coalesce(n.`{property_name}`, value) }} "
+    "IN TRANSACTIONS OF {batch} ROWS"
+)
+SET_RELATIONSHIP_PROPERTY_FORMAT = (
+    "MATCH ()-[r:`{relationship_type}`]->() "
+    "WHERE r.`{property_name}` IS NULL "
+    "WITH r, $value AS value "
+    "CALL {{ WITH r, value SET r.`{property_name}` = coalesce(r.`{property_name}`, value) }} "
+    "IN TRANSACTIONS OF {batch} ROWS"
+)
 
 KEY_INDEX_QUERY_FORMAT = "CREATE CONSTRAINT {constraint_name} IF NOT EXISTS FOR (n:`{type}`) REQUIRE ({key_pattern}) IS UNIQUE"
 ENTERPRISE_KEY_INDEX_QUERY_FORMAT = "CREATE CONSTRAINT {constraint_name} IF NOT EXISTS FOR (n:`{type}`) REQUIRE ({key_pattern}) IS NODE KEY"
@@ -70,19 +85,47 @@ NODE_FIELD_INDEX_QUERY_FORMAT = (
 )
 REL_FIELD_INDEX_QUERY_FORMAT = "CREATE INDEX {constraint_name} IF NOT EXISTS FOR ()-[r:`{type}`]-() ON (r.`{field}`)"
 
-RENAME_NODE_PROPERTY_FORMAT = "MATCH (n:`{node_type}`) SET n.`{new_property_name}` = n.`{old_property_name}` REMOVE n.`{old_property_name}`"
-RENAME_RELATIONSHIP_PROPERTY_FORMAT = "MATCH ()-[r:`{relationship_type}`]->() SET r.`{new_property_name}` = r.`{old_property_name}` REMOVE r.`{old_property_name}`"
+RENAME_NODE_PROPERTY_FORMAT = (
+    "MATCH (n:`{node_type}`) "
+    "WITH n "
+    "CALL {{ WITH n SET n.`{new_property_name}` = n.`{old_property_name}` REMOVE n.`{old_property_name}` }} "
+    "IN TRANSACTIONS OF {batch} ROWS"
+)
+RENAME_RELATIONSHIP_PROPERTY_FORMAT = (
+    "MATCH ()-[r:`{relationship_type}`]->() "
+    "WITH r "
+    "CALL {{ WITH r SET r.`{new_property_name}` = r.`{old_property_name}` REMOVE r.`{old_property_name}` }} "
+    "IN TRANSACTIONS OF {batch} ROWS"
+)
 
 GET_PROPERTIES_FOR_CONSTRAINT_QUERY = "SHOW CONSTRAINTS YIELD name, properties WHERE name = $constraint_name RETURN properties"
 GET_INDEXES_BY_TYPE_QUERY = "SHOW INDEXES YIELD properties, entityType, labelsOrTypes, owningConstraint WHERE entityType = $entity_type and labelsOrTypes = [$object_type] and owningConstraint is null RETURN properties"
 
-RENAME_NODE_TYPE = "MATCH (n:`{old_type}`) SET n:`{new_type}` REMOVE n:`{old_type}`"
-RENAME_REL_TYPE = "MATCH (n)-[r:`{old_type}`]->(m) CREATE (n)-[r2:`{new_type}`]->(m) SET r2 += r WITH r DELETE r"
+RENAME_NODE_TYPE = (
+    "MATCH (n:`{old_type}`) "
+    "WITH n "
+    "CALL {{ WITH n SET n:`{new_type}` REMOVE n:`{old_type}` }} "
+    "IN TRANSACTIONS OF {batch} ROWS"
+)
+RENAME_REL_TYPE = (
+    "MATCH (n)-[r:`{old_type}`]->(m) "
+    "WITH n, r, m "
+    "CALL {{ WITH n, r, m CREATE (n)-[r2:`{new_type}`]->(m) SET r2 += r WITH r DELETE r }} "
+    "IN TRANSACTIONS OF {batch} ROWS"
+)
 
 DROP_REL_PROPERTY_FORMAT = (
-    "MATCH ()-[r:`{relationship_type}`]->() REMOVE r.`{property_name}`"
+    "MATCH ()-[r:`{relationship_type}`]->() "
+    "WITH r "
+    "CALL {{ WITH r REMOVE r.`{property_name}` }} "
+    "IN TRANSACTIONS OF {batch} ROWS"
 )
-DROP_NODE_PROPERTY_FORMAT = "MATCH (n:`{node_type}`) REMOVE n.`{property_name}`"
+DROP_NODE_PROPERTY_FORMAT = (
+    "MATCH (n:`{node_type}`) "
+    "WITH n "
+    "CALL {{ WITH n REMOVE n.`{property_name}` }} "
+    "IN TRANSACTIONS OF {batch} ROWS"
+)
 
 
 class CannotAcquireLockException(Exception):
@@ -94,9 +137,12 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
         self,
         database_connection: Neo4jDatabaseConnection,
         use_enterprise_features: bool,
+        transaction_batch_size: int = DEFAULT_TRANSACTION_BATCH_SIZE,
     ) -> None:
         self.database_connection = database_connection
         self.use_enterprise_features = use_enterprise_features
+        # Always batch write operations to limit memory pressure.
+        self.transaction_batch_size = transaction_batch_size
 
     async def make_node_constraint(
         self, node_type: str, keys: Iterable[str], constraint_name: str
@@ -125,7 +171,8 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             GET_PROPERTIES_FOR_CONSTRAINT_QUERY, constraint_name=constraint_name
         )
         result = await self.database_connection.execute(query)
-        return set(result[0]["properties"])
+        first_row = next(iter(result), None)
+        return set(first_row["properties"]) if first_row else set()
 
     async def get_indexed_properties_by_type(
         self, entity_type: str, object_type: str
@@ -187,7 +234,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
     async def execute_drop_node_type(self, operation: DropNodeType) -> None:
         await self.drop_constraint_by_name(operation.proposed_index_name)
         await self.drop_all_indexes_on_type("NODE", operation.name)
-        statement = DROP_ALL_NODES_OF_TYPE_FORMAT.format(type=operation.name)
+        statement = DROP_ALL_NODES_OF_TYPE_FORMAT.format(
+            type=operation.name, batch=self.transaction_batch_size
+        )
         query = Query.from_statement(statement)
         await self.database_connection.execute(query)
 
@@ -195,7 +244,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
         self, operation: DropRelationshipType
     ) -> None:
         await self.drop_all_indexes_on_type("RELATIONSHIP", operation.name)
-        statement = DROP_ALL_RELATIONSHIPS_OF_TYPE_FORMAT.format(type=operation.name)
+        statement = DROP_ALL_RELATIONSHIPS_OF_TYPE_FORMAT.format(
+            type=operation.name, batch=self.transaction_batch_size
+        )
         query = Query.from_statement(statement)
         await self.database_connection.execute(query)
 
@@ -204,6 +255,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             node_type=operation.node_type,
             old_property_name=operation.old_property_name,
             new_property_name=operation.new_property_name,
+            batch=self.transaction_batch_size,
         )
         query = Query.from_statement(statement)
         await self.database_connection.execute(query)
@@ -215,6 +267,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             relationship_type=operation.relationship_type,
             old_property_name=operation.old_property_name,
             new_property_name=operation.new_property_name,
+            batch=self.transaction_batch_size,
         )
         query = Query.from_statement(statement)
         await self.database_connection.execute(query)
@@ -237,7 +290,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
 
         # Rename all nodes of the old type to the new type.
         statement = RENAME_NODE_TYPE.format(
-            old_type=operation.old_type, new_type=operation.new_type
+            old_type=operation.old_type,
+            new_type=operation.new_type,
+            batch=self.transaction_batch_size,
         )
         await self.database_connection.execute(Query.from_statement(statement))
 
@@ -264,7 +319,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
 
         # Rename all rels of the old type to the new type.
         statement = RENAME_REL_TYPE.format(
-            old_type=operation.old_type, new_type=operation.new_type
+            old_type=operation.old_type,
+            new_type=operation.new_type,
+            batch=self.transaction_batch_size,
         )
         query = Query.from_statement(statement)
         await self.database_connection.execute(query)
@@ -317,7 +374,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
 
     async def execute_add_node_property(self, operation: AddNodeProperty) -> None:
         statement = SET_NODE_PROPERTY_FORMAT.format(
-            node_type=operation.node_type, property_name=operation.property_name
+            node_type=operation.node_type,
+            property_name=operation.property_name,
+            batch=self.transaction_batch_size,
         )
         query = Query.from_statement(statement, value=operation.default)
         await self.database_connection.execute(query)
@@ -328,13 +387,16 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
         statement = SET_RELATIONSHIP_PROPERTY_FORMAT.format(
             relationship_type=operation.relationship_type,
             property_name=operation.property_name,
+            batch=self.transaction_batch_size,
         )
         query = Query.from_statement(statement, value=operation.default)
         await self.database_connection.execute(query)
 
     async def execute_drop_node_property(self, operation: DropNodeProperty) -> None:
         statement = DROP_NODE_PROPERTY_FORMAT.format(
-            node_type=operation.node_type, property_name=operation.property_name
+            node_type=operation.node_type,
+            property_name=operation.property_name,
+            batch=self.transaction_batch_size,
         )
         query = Query.from_statement(statement)
         await self.database_connection.execute(query)
@@ -345,6 +407,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
         statement = DROP_REL_PROPERTY_FORMAT.format(
             relationship_type=operation.relationship_type,
             property_name=operation.property_name,
+            batch=self.transaction_batch_size,
         )
         query = Query.from_statement(statement)
         await self.database_connection.execute(query)
@@ -382,7 +445,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             operation.new_key_part_name,
         )
         keys = await self.get_properties_by_constraint_name(constraint_name)
-        keys.remove(operation.old_key_part_name)
+        # Protect against removing a key part that is no longer in the constraint.
+        if operation.old_key_part_name in keys:
+            keys.remove(operation.old_key_part_name)
         keys.add(operation.new_key_part_name)
         await self.drop_constraint_by_name(constraint_name)
         await self.execute_rename_node_property(as_rename)
