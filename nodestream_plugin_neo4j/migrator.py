@@ -60,9 +60,6 @@ DROP_ALL_RELATIONSHIPS_OF_TYPE_FORMAT = "MATCH ()-[r:`{type}`]->() WITH r CALL {
 INDEMPOTENT_DROP_INDEX_FORMAT = "DROP INDEX {index_name} IF EXISTS"
 INDEMPOTENT_DROP_CONSTRAINT = "DROP CONSTRAINT {constraint_name} IF EXISTS"
 
-# Default batch size for IN TRANSACTIONS
-DEFAULT_TRANSACTION_BATCH_SIZE = 10000
-
 SET_NODE_PROPERTY_FORMAT = (
     ":auto MATCH (n:`{node_type}`) "
     "WHERE n.`{property_name}` IS NULL "
@@ -137,7 +134,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
         self,
         database_connection: Neo4jDatabaseConnection,
         use_enterprise_features: bool,
-        transaction_batch_size: int = DEFAULT_TRANSACTION_BATCH_SIZE,
+        transaction_batch_size: int = 10000,
     ) -> None:
         self.database_connection = database_connection
         self.use_enterprise_features = use_enterprise_features
