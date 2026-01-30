@@ -49,7 +49,7 @@ class Neo4jExtractor(Extractor):
     async def extract_records(self):
         offset = 0
         should_continue = True
-    
+
         while should_continue:
             params = dict(**self.parameters, limit=self.limit, offset=offset)
             self.logger.info(
