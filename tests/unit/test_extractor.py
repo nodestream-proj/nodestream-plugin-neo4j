@@ -8,6 +8,14 @@ from nodestream_plugin_neo4j.query import Query
 from .matchers import ran_query
 
 
+class FakeRecord:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def data(self):
+        return self._payload
+
+
 @pytest.mark.asyncio
 async def test_extract_records(mocker):
     query = "MATCH (n:{test: $test}) RETURN n.name as name"
@@ -20,8 +28,8 @@ async def test_extract_records(mocker):
     )
 
     connection.execute.side_effect = [
-        [{"name": "test1"}, {"name": "test2"}],
-        [{"name": "test3"}],
+        [FakeRecord({"name": "test1"}), FakeRecord({"name": "test2"})],
+        [FakeRecord({"name": "test3"})],
         [],
     ]
     result = [item async for item in extractor.extract_records()]
@@ -32,27 +40,3 @@ async def test_extract_records(mocker):
     expected_query = Query(query, {"test": "test", "limit": 2, "offset": 0})
 
     assert_that(extractor, ran_query(expected_query))
-
-
-@pytest.mark.asyncio
-async def test_extract_records_normalizes_neo4j_record_like_objects(mocker):
-    class FakeRecord:
-        def __init__(self, payload):
-            self._payload = payload
-
-        def data(self):
-            return self._payload
-
-    query = "MATCH (n) RETURN n.name as name"
-    connection = mocker.AsyncMock(Neo4jDatabaseConnection)
-    extractor = Neo4jExtractor(
-        query=query,
-        database_connection=connection,
-        parameters={},
-        limit=2,
-    )
-
-    connection.execute.return_value = [FakeRecord({"name": "alice"})]
-
-    result = [item async for item in extractor.extract_records()]
-    assert_that(result, equal_to([{"name": "alice"}]))
