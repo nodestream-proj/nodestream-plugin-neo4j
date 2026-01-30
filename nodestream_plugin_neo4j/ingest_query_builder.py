@@ -98,7 +98,9 @@ def _make_relationship(
     creation_rule: RelationshipCreationRule,
     set_first_ingested_at: bool,
 ):
-    keys = generate_properties_set_with_prefix((rel_identity.keys), RELATIONSHIP_REF_NAME)
+    keys = generate_properties_set_with_prefix(
+        (rel_identity.keys), RELATIONSHIP_REF_NAME
+    )
     merge_rel_query = (
         QueryBuilder()
         .merge()

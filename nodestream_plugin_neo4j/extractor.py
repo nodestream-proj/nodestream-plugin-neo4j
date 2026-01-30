@@ -57,17 +57,12 @@ class Neo4jExtractor(Extractor):
                 extra=dict(query=self.query, params=params),
             )
 
-            query = Query.from_statement(
-                self.query, is_implicit=self.is_implicit, **params
+            query = Query(
+                self.query,
+                parameters=params,
+                is_apoc=self.is_apoc,
+                is_implicit=self.is_implicit,
             )
-            # Set is_apoc for tagging/metrics if requested.
-            if self.is_apoc:
-                query = Query(
-                    query.query_statement,
-                    query.parameters,
-                    is_apoc=True,
-                    is_implicit=query.is_implicit,
-                )
             query_results = await self.database_connection.execute(
                 query,
                 routing_=RoutingControl.READ,

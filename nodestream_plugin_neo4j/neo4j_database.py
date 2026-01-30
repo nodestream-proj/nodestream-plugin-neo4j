@@ -129,7 +129,8 @@ class Neo4jDatabaseConnection:
         ) as session:
             # TODO we need to use Neo4j's Query classes to avoid string interpolation in the future for injection protection.
             async_result: AsyncResult = await session.run(
-                query.query_statement, parameters=query.parameters # type: ignore
+                query.query_statement,
+                parameters=query.parameters,  # type: ignore
             )
             records: list[Record] = [record async for record in async_result]
             keys_list: list[str] = list(async_result.keys())
@@ -145,11 +146,11 @@ class Neo4jDatabaseConnection:
     ) -> Iterable[Record]:
         # TODO we need to use Neo4j's Query classes to avoid string interpolation in the future for injection protection.
         native: EagerResult = await self.driver.execute_query(
-            query.query_statement, 
-            query.parameters, 
+            query.query_statement,
+            query.parameters,
             database_=self.database_name,
             routing_=routing_,
-        ) # type: ignore
+        )  # type: ignore
         result = Neo4jResult(
             query, list(native.records), list(native.keys), native.summary
         )
