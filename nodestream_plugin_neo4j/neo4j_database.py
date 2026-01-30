@@ -1,13 +1,16 @@
 import asyncio
+from dataclasses import dataclass as _unused_dataclass  # noqa: F401
 from logging import getLogger
-from typing import Awaitable, Iterable, Tuple, Union
+from typing import Awaitable, Callable, Iterable, Tuple, Union
 
 from neo4j import (
     AsyncDriver,
     AsyncGraphDatabase,
+    AsyncResult,
     AsyncSession,
     EagerResult,
     Record,
+    ResultSummary,
     RoutingControl,
 )
 from neo4j.auth_management import AsyncAuthManagers
@@ -28,7 +31,7 @@ RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, Auth
 def auth_provider_factory(
     username: Union[str, LazyLoadedArgument],
     password: Union[str, LazyLoadedArgument],
-) -> Awaitable[Tuple[str, str]]:
+) -> Callable[[], Awaitable[Tuple[str, str]]]:
     logger = getLogger(__name__)
 
     async def auth_provider():
@@ -63,7 +66,7 @@ class Neo4jDatabaseConnection:
         retry_factor: int = 1,
         **driver_kwargs,
     ):
-        def driver_factory():
+        def driver_factory() -> AsyncDriver:
             auth = AsyncAuthManagers.basic(auth_provider_factory(username, password))
             return AsyncGraphDatabase.driver(uri, auth=auth, **driver_kwargs)
 
@@ -76,21 +79,22 @@ class Neo4jDatabaseConnection:
         max_retry_attempts: int = 3,
         retry_factor: float = 1,
     ) -> None:
-        self.driver_factory = driver_factory
+        self.driver_factory: Callable[[], AsyncDriver] = driver_factory
         self.database_name = database_name
         self.logger = getLogger(self.__class__.__name__)
         self.max_retry_attempts = max_retry_attempts
         self.retry_factor = retry_factor
-        self._driver = None
-        self.query_set: set[Query] = set()
+        self._driver: AsyncDriver | None = None
+        self.query_set: set[str] = set()
 
     def acquire_driver(self) -> AsyncDriver:
         self._driver = self.driver_factory()
+        return self._driver
 
     @property
-    def driver(self):
+    def driver(self) -> AsyncDriver:
         if self._driver is None:
-            self.acquire_driver()
+            return self.acquire_driver()
         return self._driver
 
     def log_query_start(self, query: Query):
@@ -110,19 +114,58 @@ class Neo4jDatabaseConnection:
         log_result: bool = False,
         routing_=RoutingControl.WRITE,
     ) -> Iterable[Record]:
-        result: EagerResult = await self.driver.execute_query(
+        if query.is_implicit:
+            return await self.execute_implicit_query(query, log_result, routing_)
+        return await self.execute_explicit_query(query, log_result, routing_)
+
+    async def execute_implicit_query(
+        self,
+        query: Query,
+        log_result: bool = False,
+        routing_=RoutingControl.WRITE,
+    ) -> Iterable[Record]:
+        async with self.driver.session(
+            database=self.database_name, default_access_mode=routing_
+        ) as session:
+            # TODO we need to use Neo4j's Query classes to avoid string interpolation in the future for injection protection.
+            async_result: AsyncResult = await session.run(
+                query.query_statement, parameters=query.parameters
+            )
+            records: list[Record] = [record async for record in async_result]
+            keys_list: list[str] = list(async_result.keys())
+            summary: ResultSummary = await async_result.consume()
+            result = Neo4jResult(query, records, keys_list, summary)
+        return self._finalize_query_result(query, result, log_result)
+
+    async def execute_explicit_query(
+        self,
+        query: Query,
+        log_result: bool = False,
+        routing_=RoutingControl.WRITE,
+    ) -> Iterable[Record]:
+        # TODO we need to use Neo4j's Query classes to avoid string interpolation in the future for injection protection.
+        native: EagerResult = await self.driver.execute_query(
             query.query_statement,
             query.parameters,
             database_=self.database_name,
             routing_=routing_,
         )
-        neo4j_result = Neo4jResult(query, result)
+        result = Neo4jResult(
+            query, list(native.records), list(native.keys), native.summary
+        )
+        return self._finalize_query_result(query, result, log_result)
+
+    def _finalize_query_result(
+        self,
+        query: Query,
+        result: Neo4jResult,
+        log_result: bool,
+    ) -> Iterable[Record]:
         if log_result:
-            statistics = neo4j_result.obtain_query_statistics()
+            statistics: Neo4jQueryStatistics = result.obtain_query_statistics()
             self.log_error_messages_from_statistics(statistics)
             statistics.update_metrics_from_summary()
-
-        return neo4j_result.records
+        return result.records
 
     def log_error_messages_from_statistics(self, statistics: Neo4jQueryStatistics):
         for error in statistics.error_messages:

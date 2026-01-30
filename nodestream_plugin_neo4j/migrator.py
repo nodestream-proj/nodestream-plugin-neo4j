@@ -234,7 +234,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
         statement = DROP_ALL_NODES_OF_TYPE_FORMAT.format(
             type=operation.name, batch=self.transaction_batch_size
         )
-        query = Query.from_statement(statement)
+        query = Query.from_statement(statement, is_implicit=True)
         await self.database_connection.execute(query)
 
     async def execute_drop_relationship_type(
@@ -244,7 +244,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
         statement = DROP_ALL_RELATIONSHIPS_OF_TYPE_FORMAT.format(
             type=operation.name, batch=self.transaction_batch_size
         )
-        query = Query.from_statement(statement)
+        query = Query.from_statement(statement, is_implicit=True)
         await self.database_connection.execute(query)
 
     async def execute_rename_node_property(self, operation: RenameNodeProperty) -> None:
@@ -254,7 +254,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             new_property_name=operation.new_property_name,
             batch=self.transaction_batch_size,
         )
-        query = Query.from_statement(statement)
+        query = Query.from_statement(statement, is_implicit=True)
         await self.database_connection.execute(query)
 
     async def execute_rename_relationship_property(
@@ -266,7 +266,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             new_property_name=operation.new_property_name,
             batch=self.transaction_batch_size,
         )
-        query = Query.from_statement(statement)
+        query = Query.from_statement(statement, is_implicit=True)
         await self.database_connection.execute(query)
 
     async def execute_rename_node_type(self, operation: RenameNodeType) -> None:
@@ -291,7 +291,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             new_type=operation.new_type,
             batch=self.transaction_batch_size,
         )
-        await self.database_connection.execute(Query.from_statement(statement))
+        await self.database_connection.execute(
+            Query.from_statement(statement, is_implicit=True)
+        )
 
         # Create the new constraint.
         await self.make_node_constraint(
@@ -320,7 +322,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             new_type=operation.new_type,
             batch=self.transaction_batch_size,
         )
-        query = Query.from_statement(statement)
+        query = Query.from_statement(statement, is_implicit=True)
         await self.database_connection.execute(query)
 
         # Create the new indexes.
@@ -375,7 +377,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             property_name=operation.property_name,
             batch=self.transaction_batch_size,
         )
-        query = Query.from_statement(statement, value=operation.default)
+        query = Query.from_statement(
+            statement, value=operation.default, is_implicit=True
+        )
         await self.database_connection.execute(query)
 
     async def execute_add_relationship_property(
@@ -386,7 +390,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             property_name=operation.property_name,
             batch=self.transaction_batch_size,
         )
-        query = Query.from_statement(statement, value=operation.default)
+        query = Query.from_statement(
+            statement, value=operation.default, is_implicit=True
+        )
         await self.database_connection.execute(query)
 
     async def execute_drop_node_property(self, operation: DropNodeProperty) -> None:
@@ -395,7 +401,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             property_name=operation.property_name,
             batch=self.transaction_batch_size,
         )
-        query = Query.from_statement(statement)
+        query = Query.from_statement(statement, is_implicit=True)
         await self.database_connection.execute(query)
 
     async def execute_drop_relationship_property(
@@ -406,7 +412,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             property_name=operation.property_name,
             batch=self.transaction_batch_size,
         )
-        query = Query.from_statement(statement)
+        query = Query.from_statement(statement, is_implicit=True)
         await self.database_connection.execute(query)
 
     async def execute_node_key_extended(self, operation: NodeKeyExtended) -> None:

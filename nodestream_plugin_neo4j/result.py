@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from dacite import from_dict
-from neo4j import EagerResult, Record, ResultSummary
+from neo4j import Record, ResultSummary
 from nodestream.metrics import Metric, Metrics
 
 from .query import ApocBatchResponse, Query
@@ -170,10 +170,10 @@ class Neo4jQueryStatistics:
 
         # Set timing metrics
         stats.timing = Neo4jTimingMetrics(
-            planning_time_ms=summary.result_available_after,
-            processing_time_ms=summary.result_consumed_after,
-            total_time_ms=summary.result_available_after
-            + summary.result_consumed_after,
+            planning_time_ms=summary.result_available_after or 0,
+            processing_time_ms=summary.result_consumed_after or 0,
+            total_time_ms=(summary.result_available_after or 0)
+            + (summary.result_consumed_after or 0),
         )
 
         # Handle APOC metrics if present
@@ -265,11 +265,17 @@ class Neo4jQueryStatistics:
 class Neo4jResult:
     """Container for Neo4j query results with consolidated statistics."""
 
-    def __init__(self, query: Query, result: EagerResult):
+    def __init__(
+        self,
+        query: Query,
+        records: list[Record],
+        keys: list[str],
+        summary: ResultSummary,
+    ):
         self.query = query
-        self.records: List[Record] = result.records
-        self.keys: List[str] = result.keys
-        self.summary: ResultSummary = result.summary
+        self.records: List[Record] = records
+        self.keys: List[str] = keys
+        self.summary: ResultSummary = summary
 
     def obtain_query_statistics(self) -> Neo4jQueryStatistics:
         # Extract APOC response if this is an APOC query
