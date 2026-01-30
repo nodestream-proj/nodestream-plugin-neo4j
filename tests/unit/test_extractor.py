@@ -24,7 +24,6 @@ async def test_extract_records(mocker):
         [{"name": "test3"}],
         [],
     ]
-
     result = [item async for item in extractor.extract_records()]
     assert_that(
         result, equal_to([{"name": "test1"}, {"name": "test2"}, {"name": "test3"}])
