@@ -65,7 +65,7 @@ class Neo4jDatabaseConnection:
         max_retry_attempts: int = 3,
         retry_factor: int = 1,
         **driver_kwargs,
-    ):
+    ) -> "Neo4jDatabaseConnection":
         def driver_factory() -> AsyncDriver:
             auth = AsyncAuthManagers.basic(auth_provider_factory(username, password))
             return AsyncGraphDatabase.driver(uri, auth=auth, **driver_kwargs)
@@ -74,7 +74,7 @@ class Neo4jDatabaseConnection:
 
     def __init__(
         self,
-        driver_factory,
+        driver_factory: Callable[[], AsyncDriver],
         database_name: str,
         max_retry_attempts: int = 3,
         retry_factor: float = 1,

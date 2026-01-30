@@ -15,8 +15,6 @@ class Neo4jExtractor(Extractor):
         query: str,
         parameters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
-        is_apoc: bool = False,
-        is_implicit: bool = False,
         **connection_args,
     ):
         connector = Neo4jDatabaseConnection.from_configuration(**connection_args)
@@ -34,9 +32,9 @@ class Neo4jExtractor(Extractor):
         parameters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
     ) -> None:
-        self.database_connection = database_connection
+        self.database_connection: Neo4jDatabaseConnection = database_connection
         self.query = query
-        self.parameters = parameters or {}
+        self.parameters: dict[str, Any] = parameters or {}
         self.limit = limit
         self.logger = getLogger(self.__class__.__name__)
 
@@ -63,4 +61,4 @@ class Neo4jExtractor(Extractor):
             should_continue = len(returned_records) > 0
             offset += self.limit
             for item in returned_records:
-                yield item
+                yield item.data()
