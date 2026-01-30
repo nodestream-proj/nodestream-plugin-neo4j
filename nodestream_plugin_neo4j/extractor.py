@@ -25,8 +25,6 @@ class Neo4jExtractor(Extractor):
             connector,
             parameters,
             limit,
-            is_apoc=is_apoc,
-            is_implicit=is_implicit,
         )
 
     def __init__(
@@ -35,15 +33,11 @@ class Neo4jExtractor(Extractor):
         database_connection: Neo4jDatabaseConnection,
         parameters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
-        is_apoc: bool = False,
-        is_implicit: bool = False,
     ) -> None:
         self.database_connection = database_connection
         self.query = query
         self.parameters = parameters or {}
         self.limit = limit
-        self.is_apoc = is_apoc
-        self.is_implicit = is_implicit
         self.logger = getLogger(self.__class__.__name__)
 
     async def extract_records(self):
@@ -60,8 +54,6 @@ class Neo4jExtractor(Extractor):
             query = Query(
                 self.query,
                 parameters=params,
-                is_apoc=self.is_apoc,
-                is_implicit=self.is_implicit,
             )
             query_results = await self.database_connection.execute(
                 query,
