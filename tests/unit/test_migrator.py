@@ -78,7 +78,7 @@ async def test_execute_relationship_key_extended(migrator):
     )
     await migrator.execute_operation(operation)
     query = Query.from_statement(
-        f"MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WHERE r.`key` IS NULL WITH r, $value AS value CALL {{ WITH r, value SET r.`key` = coalesce(r.`key`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
+        f"MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WHERE r.`key` IS NULL WITH r, $value AS value CALL {{ WITH r, value SET r.`key` = coalesce(r.`key`, value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
         value="foo",
         is_implicit=True,
     )
@@ -92,7 +92,7 @@ async def test_execute_relationship_property_added(migrator):
     )
     await migrator.execute_operation(operation)
     expected_query = Query.from_statement(
-        f"MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WHERE r.`prop` IS NULL WITH r, $value AS value CALL {{ WITH r, value SET r.`prop` = coalesce(r.`prop`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
+        f"MATCH ()-[r:`RELATIONSHIP_TYPE`]->() WHERE r.`prop` IS NULL WITH r, $value AS value CALL {{ WITH r, value SET r.`prop` = coalesce(r.`prop`, value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
         value="foo",
         is_implicit=True,
     )
@@ -249,7 +249,7 @@ async def test_add_node_property(migrator):
     )
     await migrator.execute_operation(operation)
     expected_query = Query.from_statement(
-        f"MATCH (n:`NodeType`) WHERE n.`prop` IS NULL WITH n, $value AS value CALL {{ WITH n, value SET n.`prop` = coalesce(n.`prop`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
+        f"MATCH (n:`NodeType`) WHERE n.`prop` IS NULL WITH n, $value AS value CALL {{ WITH n, value SET n.`prop` = coalesce(n.`prop`, value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
         value="foo",
         is_implicit=True,
     )
@@ -274,7 +274,7 @@ async def test_node_key_extended_with_default(migrator):
     )
     await migrator.execute_operation(operation)
     expected_query = Query.from_statement(
-        f"MATCH (n:`NodeType`) WHERE n.`key` IS NULL WITH n, $value AS value CALL {{ WITH n, value SET n.`key` = coalesce(n.`key`, $value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
+        f"MATCH (n:`NodeType`) WHERE n.`key` IS NULL WITH n, $value AS value CALL {{ WITH n, value SET n.`key` = coalesce(n.`key`, value) }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
         value="foo",
         is_implicit=True,
     )

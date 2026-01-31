@@ -64,14 +64,14 @@ SET_NODE_PROPERTY_FORMAT = (
     "MATCH (n:`{node_type}`) "
     "WHERE n.`{property_name}` IS NULL "
     "WITH n, $value AS value "
-    "CALL {{ WITH n, value SET n.`{property_name}` = coalesce(n.`{property_name}`, $value) }} "
+    "CALL {{ WITH n, value SET n.`{property_name}` = coalesce(n.`{property_name}`, value) }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 SET_RELATIONSHIP_PROPERTY_FORMAT = (
     "MATCH ()-[r:`{relationship_type}`]->() "
     "WHERE r.`{property_name}` IS NULL "
     "WITH r, $value AS value "
-    "CALL {{ WITH r, value SET r.`{property_name}` = coalesce(r.`{property_name}`, $value) }} "
+    "CALL {{ WITH r, value SET r.`{property_name}` = coalesce(r.`{property_name}`, value) }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 
@@ -123,6 +123,8 @@ DROP_NODE_PROPERTY_FORMAT = (
     "CALL {{ WITH n REMOVE n.`{property_name}` }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
+
+DEFAULT_AS_STRING = "null"
 
 
 class CannotAcquireLockException(Exception):
@@ -378,7 +380,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             batch=self.transaction_batch_size,
         )
         query = Query.from_statement(
-            statement, value=operation.default, is_implicit=True
+            statement, value=operation.default or DEFAULT_AS_STRING, is_implicit=True
         )
         await self.database_connection.execute(query)
 
@@ -391,7 +393,7 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             batch=self.transaction_batch_size,
         )
         query = Query.from_statement(
-            statement, value=operation.default, is_implicit=True
+            statement, value=operation.default or DEFAULT_AS_STRING, is_implicit=True
         )
         await self.database_connection.execute(query)
 
