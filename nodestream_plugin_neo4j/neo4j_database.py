@@ -4,6 +4,8 @@ from logging import getLogger
 from typing import Awaitable, Callable, Iterable, Tuple, Union
 
 from neo4j import (
+    READ_ACCESS,
+    WRITE_ACCESS,
     AsyncDriver,
     AsyncGraphDatabase,
     AsyncResult,
@@ -26,6 +28,10 @@ from .query import Query
 from .result import Neo4jQueryStatistics, Neo4jResult
 
 RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
+
+
+def convert_routing_control_to_access_mode(routing_control: RoutingControl) -> str:
+    return READ_ACCESS if routing_control == RoutingControl.READ else WRITE_ACCESS
 
 
 def auth_provider_factory(
@@ -124,14 +130,20 @@ class Neo4jDatabaseConnection:
         log_result: bool = False,
         routing_=RoutingControl.WRITE,
     ) -> Iterable[Record]:
+        # For implicit transactions, Neo4j's session API expects an access mode
+        # (`READ_ACCESS` / `WRITE_ACCESS`), not a `RoutingControl` value. Map
+        # the routing hint onto the appropriate access mode here.
+        access_mode = convert_routing_control_to_access_mode(routing_)
+
         async with self.driver.session(
-            database=self.database_name, default_access_mode=routing_
+            database=self.database_name,
+            default_access_mode=access_mode,
         ) as session:
-            # TODO we need to use Neo4j's Query classes to avoid string interpolation in the future for injection protection.
+            # TODO: we need to use Neo4j's Query classes to avoid string interpolation in the future for injection protection.
             async_result: AsyncResult = await session.run(
                 query.query_statement,
-                parameters=query.parameters,  # type: ignore
-            )
+                parameters=query.parameters,
+            )  # type: ignore
             records: list[Record] = [record async for record in async_result]
             keys_list: list[str] = list(async_result.keys())
             summary: ResultSummary = await async_result.consume()
