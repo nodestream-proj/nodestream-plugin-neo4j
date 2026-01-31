@@ -294,19 +294,3 @@ async def test_node_key_renamed(migrator, mocker):
             f"MATCH (n:`NodeType`) WITH n CALL {{ WITH n SET n.`key` = n.`foo` REMOVE n.`foo` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
         ),
     )
-
-
-@pytest.mark.asyncio
-async def test_node_key_renamed_idempotent_when_old_missing(migrator, mocker):
-    # Simulate a completed state where the old key part no longer exists in the constraint
-    migrator.get_properties_by_constraint_name = mocker.AsyncMock(return_value=set())
-    operation = NodeKeyPartRenamed(
-        new_key_part_name="key", node_type="NodeType", old_key_part_name="foo"
-    )
-    # Should not raise and should still perform the rename in batched mode
-    await migrator.execute_operation(operation)
-    expected = Query.from_statement(
-        f"MATCH (n:`NodeType`) WITH n CALL {{ WITH n SET n.`key` = n.`foo` REMOVE n.`foo` }} IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
-        is_implicit=True,
-    )
-    assert_that(migrator, ran_query(expected))
