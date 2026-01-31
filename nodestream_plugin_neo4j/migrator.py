@@ -449,8 +449,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
         )
         keys = await self.get_properties_by_constraint_name(constraint_name)
         # Protect against removing a key part that is no longer in the constraint.
-        if operation.old_key_part_name in keys:
-            keys.remove(operation.old_key_part_name)
+        if operation.old_key_part_name not in keys:
+            return
+        keys.remove(operation.old_key_part_name)
         keys.add(operation.new_key_part_name)
         await self.drop_constraint_by_name(constraint_name)
         await self.execute_rename_node_property(as_rename)
