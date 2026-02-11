@@ -1,11 +1,29 @@
 from logging import getLogger
-from typing import Any, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Iterator, Mapping, Optional
 
-from neo4j import RoutingControl
+from neo4j import Record, RoutingControl
 from nodestream.pipeline import Extractor
 
 from .neo4j_database import Neo4jDatabaseConnection
 from .query import Query
+
+
+class Neo4jRecordWrapper(Mapping[str, Any]):
+    def __init__(self, record: Record) -> None:
+        self.original = record  # Maintained Context Object
+        self.data = record.data()  # Dictionary accessible view of the record.
+
+    def __getitem__(self, key: str) -> Any:
+        return self.data[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.data)
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __repr__(self) -> str:
+        return f"Neo4jRecordWrapper(data={self.data})"
 
 
 class Neo4jExtractor(Extractor):
@@ -18,12 +36,7 @@ class Neo4jExtractor(Extractor):
         **connection_args,
     ):
         connector = Neo4jDatabaseConnection.from_configuration(**connection_args)
-        return cls(
-            query,
-            connector,
-            parameters,
-            limit,
-        )
+        return cls(query, connector, parameters, limit)
 
     def __init__(
         self,
@@ -38,7 +51,7 @@ class Neo4jExtractor(Extractor):
         self.limit = limit
         self.logger = getLogger(self.__class__.__name__)
 
-    async def extract_records(self):
+    async def extract_records(self) -> AsyncGenerator[Neo4jRecordWrapper, None]:
         offset = 0
         should_continue = True
 
@@ -60,5 +73,5 @@ class Neo4jExtractor(Extractor):
             returned_records = list(query_results)
             should_continue = len(returned_records) > 0
             offset += self.limit
-            for item in returned_records:
-                yield item.data()
+            for record in returned_records:
+                yield Neo4jRecordWrapper(record)

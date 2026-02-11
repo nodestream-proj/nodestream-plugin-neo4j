@@ -54,8 +54,16 @@ RELEASE_LOCK_QUERY = Query.from_statement(
 LIST_MIGRATIONS_QUERY = "MATCH (m:__NodestreamMigration__) RETURN m.name as name"
 MARK_MIGRATION_AS_EXECUTED_QUERY = "MERGE (:__NodestreamMigration__ {name: $name})"
 
-DROP_ALL_NODES_OF_TYPE_FORMAT = "MATCH (n:`{type}`) WITH n CALL {{ WITH n DETACH DELETE n }} IN TRANSACTIONS OF {batch} ROWS"
-DROP_ALL_RELATIONSHIPS_OF_TYPE_FORMAT = "MATCH ()-[r:`{type}`]->() WITH r CALL {{ WITH r DELETE r }} IN TRANSACTIONS OF {batch} ROWS"
+DROP_ALL_NODES_OF_TYPE_FORMAT = (
+    "MATCH (n:`{type}`) "
+    "CALL {{ WITH n DETACH DELETE n }} "
+    "IN TRANSACTIONS OF {batch} ROWS"
+)
+DROP_ALL_RELATIONSHIPS_OF_TYPE_FORMAT = (
+    "MATCH ()-[r:`{type}`]->() "
+    "CALL {{ WITH r DELETE r }} "
+    "IN TRANSACTIONS OF {batch} ROWS"
+)
 
 INDEMPOTENT_DROP_INDEX_FORMAT = "DROP INDEX {index_name} IF EXISTS"
 INDEMPOTENT_DROP_CONSTRAINT = "DROP CONSTRAINT {constraint_name} IF EXISTS"
@@ -71,7 +79,8 @@ SET_RELATIONSHIP_PROPERTY_FORMAT = (
     "MATCH ()-[r:`{relationship_type}`]->() "
     "WHERE r.`{property_name}` IS NULL "
     "WITH r, $value AS value "
-    "CALL {{ WITH r, value SET r.`{property_name}` = coalesce(r.`{property_name}`, value) }} "
+    "CALL {{ WITH r, value "
+    "SET r.`{property_name}` = coalesce(r.`{property_name}`, value) }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 
@@ -84,14 +93,16 @@ REL_FIELD_INDEX_QUERY_FORMAT = "CREATE INDEX {constraint_name} IF NOT EXISTS FOR
 
 RENAME_NODE_PROPERTY_FORMAT = (
     "MATCH (n:`{node_type}`) "
-    "WITH n "
-    "CALL {{ WITH n SET n.`{new_property_name}` = n.`{old_property_name}` REMOVE n.`{old_property_name}` }} "
+    "CALL {{ WITH n "
+    "SET n.`{new_property_name}` = n.`{old_property_name}` "
+    "REMOVE n.`{old_property_name}` }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 RENAME_RELATIONSHIP_PROPERTY_FORMAT = (
     "MATCH ()-[r:`{relationship_type}`]->() "
-    "WITH r "
-    "CALL {{ WITH r SET r.`{new_property_name}` = r.`{old_property_name}` REMOVE r.`{old_property_name}` }} "
+    "CALL {{ WITH r "
+    "SET r.`{new_property_name}` = r.`{old_property_name}` "
+    "REMOVE r.`{old_property_name}` }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 
@@ -100,26 +111,27 @@ GET_INDEXES_BY_TYPE_QUERY = "SHOW INDEXES YIELD properties, entityType, labelsOr
 
 RENAME_NODE_TYPE = (
     "MATCH (n:`{old_type}`) "
-    "WITH n "
-    "CALL {{ WITH n SET n:`{new_type}` REMOVE n:`{old_type}` }} "
+    "CALL {{ WITH n "
+    "SET n:`{new_type}` "
+    "REMOVE n:`{old_type}` }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 RENAME_REL_TYPE = (
     "MATCH (n)-[r:`{old_type}`]->(m) "
-    "WITH n, r, m "
-    "CALL {{ WITH n, r, m CREATE (n)-[r2:`{new_type}`]->(m) SET r2 += r WITH r DELETE r }} "
+    "CALL {{ WITH n, r, m "
+    "CREATE (n)-[r2:`{new_type}`]->(m) "
+    "SET r2 += r "
+    "DELETE r }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 
 DROP_REL_PROPERTY_FORMAT = (
     "MATCH ()-[r:`{relationship_type}`]->() "
-    "WITH r "
     "CALL {{ WITH r REMOVE r.`{property_name}` }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 DROP_NODE_PROPERTY_FORMAT = (
     "MATCH (n:`{node_type}`) "
-    "WITH n "
     "CALL {{ WITH n REMOVE n.`{property_name}` }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
