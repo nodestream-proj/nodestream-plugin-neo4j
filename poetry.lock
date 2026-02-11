@@ -858,37 +858,35 @@ pyarrow = ["pyarrow (>=1.0.0)"]
 
 [[package]]
 name = "nodestream"
-version = "0.15.0a0"
+version = "0.15.0a1"
 description = "A Fast, Declarative ETL for Graph Databases."
 optional = false
-python-versions = "^3.10"
+python-versions = "<4.0,>=3.10"
 groups = ["main"]
-files = []
-develop = true
+files = [
+    {file = "nodestream-0.15.0a1-py3-none-any.whl", hash = "sha256:18afb044251511254b30968c9f72967d4527bed1bf13e5f1513e6b11704f2762"},
+    {file = "nodestream-0.15.0a1.tar.gz", hash = "sha256:d694bd75825e61827128c8b2ca4901027348dfb561ddf2826f1202a923c5d290"},
+]
 
 [package.dependencies]
-boto3 = "^1.34.127"
-cleo = "^2.0"
-confluent-kafka = "^2.5"
-cookiecutter = "^2.0"
-httpx = "^0.27"
-Jinja2 = "^3"
-jmespath = "^1.0"
-pandas = "^2"
-psutil = "^6.0"
+boto3 = ">=1.34.127,<2.0.0"
+cleo = ">=2.0,<3.0"
+confluent-kafka = ">=2.5,<3.0"
+cookiecutter = ">=2.0,<3.0"
+httpx = ">=0.27,<0.28"
+Jinja2 = ">=3,<4"
+jmespath = ">=1.0,<2.0"
+pandas = ">=2,<3"
+psutil = ">=6.0,<7.0"
 pyarrow = ">=17.0.0,<19.0.0"
-python-json-logger = "^2.0"
-pyyaml = "^6.0"
-schema = "^0.7"
+python-json-logger = ">=2.0,<3.0"
+pyyaml = ">=6.0,<7.0"
+schema = ">=0.7,<0.8"
 uvloop = {version = ">=0.17.0,<=0.21.0", markers = "sys_platform == \"darwin\" or sys_platform == \"linux\""}
 
 [package.extras]
 prometheus = ["prometheus-client (>=0.21.1,<0.22.0)"]
 validation = ["genson (>=1.3.0,<2.0.0)", "jsonschema (>=4.23.0,<5.0.0)"]
-
-[package.source]
-type = "directory"
-url = "../nodestream"
 
 [[package]]
 name = "numpy"
@@ -1964,4 +1962,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "eb1c3d39a30af4c44ef233417b61a9ebf92ef11dac3ba6d1faece0e25e0d36a2"
+content-hash = "5315a7e6991f1bc26338a7b7f866483b57d59241f7b0a10d9f44aa60a6feacb8"
