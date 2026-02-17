@@ -136,6 +136,7 @@ DROP_NODE_PROPERTY_FORMAT = (
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 
+
 class CannotAcquireLockException(Exception):
     pass
 
