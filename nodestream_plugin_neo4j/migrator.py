@@ -136,9 +136,6 @@ DROP_NODE_PROPERTY_FORMAT = (
     "IN TRANSACTIONS OF {batch} ROWS"
 )
 
-DEFAULT_AS_STRING = "null"
-
-
 class CannotAcquireLockException(Exception):
     pass
 
@@ -392,7 +389,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             batch=self.transaction_batch_size,
         )
         query = Query.from_statement(
-            statement, value=operation.default or DEFAULT_AS_STRING, is_implicit=True
+            statement,
+            value=operation.default,
+            is_implicit=True,
         )
         await self.database_connection.execute(query)
 
@@ -405,7 +404,9 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
             batch=self.transaction_batch_size,
         )
         query = Query.from_statement(
-            statement, value=operation.default or DEFAULT_AS_STRING, is_implicit=True
+            statement,
+            value=operation.default,
+            is_implicit=True,
         )
         await self.database_connection.execute(query)
 
@@ -431,8 +432,13 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
 
     async def execute_node_key_extended(self, operation: NodeKeyExtended) -> None:
         constraint_name = operation.proposed_index_name
+        # For key extension, the new key property cannot be NULL, otherwise the
+        # node key / uniqueness constraint would fail. If the migration author
+        # did not provide an explicit default, fall back to the literal string
+        # "null" as a sentinel value so that the key is always populated.
+        key_default = operation.default if operation.default is not None else "null"
         as_add = AddNodeProperty(
-            operation.node_type, operation.added_key_property, operation.default
+            operation.node_type, operation.added_key_property, key_default
         )
         keys = await self.get_properties_by_constraint_name(constraint_name)
         keys.add(operation.added_key_property)
