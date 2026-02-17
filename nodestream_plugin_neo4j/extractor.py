@@ -57,10 +57,6 @@ class Neo4jExtractor(Extractor):
 
         while should_continue:
             params = dict(**self.parameters, limit=self.limit, offset=offset)
-            self.logger.info(
-                "Running query on neo4j",
-                extra=dict(query=self.query, params=params),
-            )
 
             query = Query(
                 self.query,

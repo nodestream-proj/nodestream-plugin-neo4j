@@ -20,8 +20,14 @@ RETURN a, r, b SKIP $offset LIMIT $limit
 
 
 class Neo4jTypeRetriever(TypeRetriever):
-    def __init__(self, database_connection: Neo4jDatabaseConnection) -> None:
+    def __init__(
+        self,
+        database_connection: Neo4jDatabaseConnection,
+        limit: int = 1000,
+    ) -> None:
         self.database_connection = database_connection
+        self.limit = limit
+
 
     def map_neo4j_node_to_nodestream_node(
         self, node: Neo4jNode, node_type: str
@@ -46,6 +52,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         return Neo4jExtractor(
             FETCH_ALL_NODES_BY_TYPE_QUERY_FORMAT.format(type=node_type),
             self.database_connection,
+            limit=self.limit,
         )
 
     def get_relationships_of_type_bettween_extractor(
@@ -58,6 +65,7 @@ class Neo4jTypeRetriever(TypeRetriever):
                 to_node_type=to_node_type,
             ),
             self.database_connection,
+            limit=self.limit,
         )
 
     async def get_nodes_of_type(self, node_type: str) -> AsyncGenerator[Node, None]:

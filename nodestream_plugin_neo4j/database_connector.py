@@ -51,7 +51,7 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         retries_per_chunk: int = 3,
         set_first_ingested_at: bool = False,
         transaction_batch_size: int = 10000,
-    ) -> None:
+        ) -> None:
         self.use_enterprise_features = use_enterprise_features
         self.use_apoc = use_apoc
         self.database_connection = database_connection
@@ -73,8 +73,8 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
             retries_per_chunk=self.retries_per_chunk,
         )
 
-    def make_type_retriever(self) -> TypeRetriever:
-        return Neo4jTypeRetriever(self.database_connection)
+    def make_type_retriever(self, limit: int = 1000) -> TypeRetriever:
+        return Neo4jTypeRetriever(self.database_connection, limit)
 
     def make_migrator(self) -> Migrator:
         return Neo4jMigrator(

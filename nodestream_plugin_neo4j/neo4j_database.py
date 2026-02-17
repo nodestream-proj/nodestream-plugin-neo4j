@@ -129,9 +129,21 @@ class Neo4jDatabaseConnection:
         log_result: bool = False,
         routing_=RoutingControl.WRITE,
     ) -> Iterable[Record]:
+        t0 = time.monotonic()
         if query.is_implicit:
-            return await self.execute_implicit_query(query, log_result, routing_)
-        return await self.execute_explicit_query(query, log_result, routing_)
+            result = await self.execute_implicit_query(query, log_result, routing_)
+        else:
+            result = await self.execute_explicit_query(query, log_result, routing_)
+        if routing_ == RoutingControl.WRITE:
+            wall_ms = (time.monotonic() - t0) * 1000
+            self.logger.info(
+                "Write round-trip",
+                extra={
+                    "wall_clock_ms": round(wall_ms, 1),
+                    "is_apoc": query.is_apoc,
+                },
+            )
+        return result
 
     async def execute_implicit_query(
         self,
@@ -187,6 +199,17 @@ class Neo4jDatabaseConnection:
             statistics: Neo4jQueryStatistics = result.obtain_query_statistics()
             self.log_error_messages_from_statistics(statistics)
             statistics.update_metrics_from_summary()
+            self.logger.info(
+                "Neo4j server-side timing",
+                extra={
+                    "planning_ms": statistics.timing.planning_time_ms,
+                    "processing_ms": statistics.timing.processing_time_ms,
+                    "server_total_ms": statistics.timing.total_time_ms,
+                    "apoc_time_ms": statistics.timing.apoc_time_ms,
+                    "operations_committed": statistics.write_metrics.operations_committed,
+                    "operations_missing": statistics.write_metrics.operations_missing,
+                },
+            )
         return result.records
 
     def log_error_messages_from_statistics(self, statistics: Neo4jQueryStatistics):
