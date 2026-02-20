@@ -12,7 +12,6 @@ from nodestream.model import (
     RelationshipWithNodes,
     TimeToLiveConfiguration,
 )
-
 from .ingest_query_builder import Neo4jIngestQueryBuilder
 from .neo4j_database import Neo4jDatabaseConnection
 from .query import Query, QueryBatch

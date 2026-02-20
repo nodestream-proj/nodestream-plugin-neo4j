@@ -185,7 +185,10 @@ class Neo4jDatabaseConnection:
             routing_=routing_,
         )  # type: ignore
         result = Neo4jResult(
-            query, list(native.records), list(native.keys), native.summary
+            query,
+            list(native.records),
+            list(native.keys),
+            native.summary,
         )
         return self._finalize_query_result(query, result, log_result)
 
