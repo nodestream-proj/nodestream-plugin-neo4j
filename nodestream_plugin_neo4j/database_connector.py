@@ -51,8 +51,6 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         retries_per_chunk: int = 3,
         set_first_ingested_at: bool = False,
         transaction_batch_size: int = 10000,
-        type_retriever_sample_ratio: int | None = None,
-        type_retriever_latest_hours: int | None = None,
     ) -> None:
         self.use_enterprise_features = use_enterprise_features
         self.use_apoc = use_apoc
