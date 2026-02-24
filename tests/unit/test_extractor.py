@@ -1,5 +1,4 @@
 import json
-from typing import override
 
 import pytest
 from hamcrest import assert_that, equal_to, has_length, is_
@@ -16,7 +15,6 @@ class FakeRecord(Record):
     def __init__(self, payload):
         self._payload = payload
 
-    @override
     def data(self):
         return self._payload
 
