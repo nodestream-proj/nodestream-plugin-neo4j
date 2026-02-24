@@ -29,12 +29,7 @@ class FakeNeo4jRel(dict):
 
 
 class FakeRecord:
-    """Mimics a neo4j Record for testing (supports .data() and __getitem__).
-
-    .data() returns plain dicts (like the real driver), but __getitem__
-    returns the original objects (FakeNeo4jNode / FakeNeo4jRel) so that
-    record.original[key] preserves graph-object attributes like .labels.
-    """
+    """Mimics a neo4j Record for testing (supports .data() and __getitem__)."""
 
     def __init__(self, payload):
         self._p = payload
@@ -79,6 +74,7 @@ def test_get_node_type_extractor(subject):
     extractor = subject.get_node_type_extractor("Person")
     expected_query = """
 MATCH (n:Person)
+
 RETURN n SKIP $offset LIMIT $limit
 """
     assert_that(extractor.query, equal_to(expected_query))
@@ -90,6 +86,7 @@ def test_get_relationships_of_type_bettween_extractor(subject):
     )
     expected_query = """
 MATCH (a:Person)-[r:KNOWS]->(b:Company)
+
 RETURN a, r, b SKIP $offset LIMIT $limit
 """
     assert_that(extractor.query, equal_to(expected_query))

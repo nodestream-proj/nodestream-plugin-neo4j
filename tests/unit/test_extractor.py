@@ -1,5 +1,9 @@
+import json
+from typing import override
+
 import pytest
 from hamcrest import assert_that, equal_to, has_length, is_
+from neo4j import Record
 
 from nodestream_plugin_neo4j.extractor import Neo4jExtractor, Neo4jRecordWrapper
 from nodestream_plugin_neo4j.neo4j_database import Neo4jDatabaseConnection
@@ -8,10 +12,11 @@ from nodestream_plugin_neo4j.query import Query
 from .matchers import ran_query
 
 
-class FakeRecord:
+class FakeRecord(Record):
     def __init__(self, payload):
         self._payload = payload
 
+    @override
     def data(self):
         return self._payload
 
@@ -50,3 +55,14 @@ async def test_extract_records(mocker):
     expected_query = Query(query, {"test": "test", "limit": 2, "offset": 0})
 
     assert_that(extractor, ran_query(expected_query))
+
+
+def test_neo4j_record_wrapper_is_json_serializable():
+    record = FakeRecord({"name": "test", "value": 42})
+    wrapper = Neo4jRecordWrapper(record)
+
+    # Should be encodable by the standard library JSON encoder without
+    # needing any special handling or custom encoder.
+    encoded = json.dumps(wrapper)
+
+    assert_that(json.loads(encoded), equal_to({"name": "test", "value": 42}))

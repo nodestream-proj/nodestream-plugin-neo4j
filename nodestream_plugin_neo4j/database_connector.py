@@ -51,7 +51,9 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         retries_per_chunk: int = 3,
         set_first_ingested_at: bool = False,
         transaction_batch_size: int = 10000,
-        ) -> None:
+        type_retriever_sample_ratio: int | None = None,
+        type_retriever_latest_hours: int | None = None,
+    ) -> None:
         self.use_enterprise_features = use_enterprise_features
         self.use_apoc = use_apoc
         self.database_connection = database_connection
@@ -73,8 +75,26 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
             retries_per_chunk=self.retries_per_chunk,
         )
 
-    def make_type_retriever(self, limit: int = 1000) -> TypeRetriever:
-        return Neo4jTypeRetriever(self.database_connection, limit)
+    def make_type_retriever(self, **kwargs) -> TypeRetriever:
+        """Create a Neo4jTypeRetriever for reading from this connector.
+
+        Supported kwargs (forwarded from `DatabaseConnector.get_type_retriever`):
+        - limit: page size for reads (default: 1000)
+        - sample_ratio: optional integer > 1 for id()-based sampling
+        - latest_hours: optional integer for `last_ingested_at` recency filter
+        """
+        limit: int = kwargs.pop("limit", 1000)
+        sample_ratio: int | None = kwargs.pop("sample_ratio", None)
+        latest_hours: int | None = kwargs.pop("latest_hours", None)
+
+        # Ignore any extra kwargs to stay compatible with future extensions.
+
+        return Neo4jTypeRetriever(
+            self.database_connection,
+            limit,
+            sample_ratio=sample_ratio,
+            latest_hours=latest_hours,
+        )
 
     def make_migrator(self) -> Migrator:
         return Neo4jMigrator(
