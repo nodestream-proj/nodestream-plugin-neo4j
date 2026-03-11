@@ -1,4 +1,4 @@
-from hamcrest import assert_that, equal_to, instance_of, is_
+from hamcrest import assert_that, equal_to, is_
 
 from nodestream_plugin_neo4j import Neo4jDatabaseConnector
 from nodestream_plugin_neo4j.query_executor import Neo4jQueryExecutor
