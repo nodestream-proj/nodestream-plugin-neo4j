@@ -1,4 +1,5 @@
 import json
+from typing import cast
 
 import pytest
 from hamcrest import assert_that, equal_to, has_length, is_
@@ -11,7 +12,13 @@ from nodestream_plugin_neo4j.query import Query
 from .matchers import ran_query
 
 
-class FakeRecord(Record):
+class FakeRecord:
+    """Minimal stand-in for a neo4j Record.
+
+    Only implements the subset of the Record interface that
+    Neo4jRecordWrapper actually depends on (.data() and item access).
+    """
+
     def __init__(self, payload):
         self._payload = payload
 
@@ -57,7 +64,7 @@ async def test_extract_records(mocker):
 
 def test_neo4j_record_wrapper_is_json_serializable():
     record = FakeRecord({"name": "test", "value": 42})
-    wrapper = Neo4jRecordWrapper(record)
+    wrapper = Neo4jRecordWrapper(cast(Record, record))
 
     # Should be encodable by the standard library JSON encoder without
     # needing any special handling or custom encoder.

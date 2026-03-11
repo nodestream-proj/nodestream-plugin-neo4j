@@ -74,19 +74,9 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         )
 
     def make_type_retriever(self, **kwargs) -> TypeRetriever:
-        """Create a Neo4jTypeRetriever for reading from this connector.
-
-        Supported kwargs (forwarded from `DatabaseConnector.get_type_retriever`):
-        - limit: page size for reads (default: 1000)
-        - sample_ratio: optional integer > 1 for id()-based sampling
-        - latest_hours: optional integer for `last_ingested_at` recency filter
-        """
         limit: int = kwargs.pop("limit", 1000)
         sample_ratio: int | None = kwargs.pop("sample_ratio", None)
         latest_hours: int | None = kwargs.pop("latest_hours", None)
-
-        # Ignore any extra kwargs to stay compatible with future extensions.
-
         return Neo4jTypeRetriever(
             self.database_connection,
             limit,

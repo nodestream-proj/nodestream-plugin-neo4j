@@ -65,10 +65,7 @@ class Neo4jQueryExecutor(QueryExecutor):
                 shape, relationships
             )
         )
-        # Route relationship batches through the same batching helper used
-        # for nodes so that connector-level options like `chunk_size`,
-        # `execute_chunks_in_parallel`, and `retries_per_chunk` apply
-        # consistently to both nodes and relationships.
+        # Use shared batch helper so chunk_size/parallel/retries apply to rels too.
         await self.execute_query_batch(batched_query)
 
     async def perform_ttl_op(self, config: TimeToLiveConfiguration):

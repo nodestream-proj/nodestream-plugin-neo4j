@@ -1,5 +1,6 @@
 from typing import AsyncGenerator, Tuple, cast
 
+from neo4j import RoutingControl
 from neo4j.graph import Node as Neo4jNode
 from neo4j.graph import Relationship as Neo4jRelationship
 from nodestream.databases import TypeRetriever
@@ -11,28 +12,24 @@ from .query import Query
 
 LAST_INGESTED_AT_PROPERTY = "last_ingested_at"
 
-FETCH_ALL_NODES_BY_TYPE_QUERY_FORMAT = """
+FETCH_ALL_NODES_BY_TYPE_QUERY_FORMAT = """\
 MATCH (n:{type})
-{where}
-RETURN n SKIP $offset LIMIT $limit
+{where}RETURN n SKIP $offset LIMIT $limit
 """
 
-FETCH_ALL_RELATIONSHIPS_BY_TYPE_BETWEEN_QUERY_FORMAT = """
+FETCH_ALL_RELATIONSHIPS_BY_TYPE_BETWEEN_QUERY_FORMAT = """\
 MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
-{where}
-RETURN a, r, b SKIP $offset LIMIT $limit
+{where}RETURN a, r, b SKIP $offset LIMIT $limit
 """
 
-COUNT_NODES_BY_TYPE_QUERY_FORMAT = """
+COUNT_NODES_BY_TYPE_QUERY_FORMAT = """\
 MATCH (n:{type})
-{where}
-RETURN count(n) AS count
+{where}RETURN count(n) AS count
 """
 
-COUNT_RELATIONSHIPS_BY_TYPE_QUERY_FORMAT = """
+COUNT_RELATIONSHIPS_BY_TYPE_QUERY_FORMAT = """\
 MATCH ()-[r:{relationship_type}]->()
-{where}
-RETURN count(r) AS count
+{where}RETURN count(r) AS count
 """
 
 
@@ -73,14 +70,21 @@ class Neo4jTypeRetriever(TypeRetriever):
             properties=PropertySet(relationship),
         )
 
-    def _node_where_clause(self, var: str) -> str:
+    def _where_clause(self, var: str) -> str:
+        """Build an optional WHERE clause (with trailing newline) for *var*.
+
+        Returns an empty string when no filters are active so the query
+        template collapses cleanly.
+        """
         clauses: list[str] = []
 
         if self.sample_ratio:
-            # Use Neo4j's elementId for sampling without APOC. The internal
-            # element id has the form "<label-id>:<internal-id>". We take the
-            # numeric suffix, cast it to an integer, and modulo that value to
-            # get a deterministic sample.
+            # NOTE: Known limitation – we parse Neo4j's elementId() string to
+            # extract a numeric internal id for deterministic sampling.  The
+            # current Neo4j 5+ format is "4:<database-uuid>:<internal-id>" and
+            # we grab the last colon-separated segment.  elementId() is
+            # documented as opaque so this could break in a future Neo4j
+            # release, but there is no stable, APOC-free alternative today.
             clauses.append(
                 f"toInteger(split(elementId({var}), ':')[-1]) % {self.sample_ratio} = 0"
             )
@@ -93,25 +97,7 @@ class Neo4jTypeRetriever(TypeRetriever):
 
         if not clauses:
             return ""
-        return "WHERE " + " AND ".join(clauses)
-
-    def _relationship_where_clause(self, rel_var: str) -> str:
-        clauses: list[str] = []
-
-        if self.sample_ratio:
-            clauses.append(
-                f"toInteger(split(elementId({rel_var}), ':')[-1]) % {self.sample_ratio} = 0"
-            )
-
-        if self.latest_hours is not None:
-            clauses.append(
-                f"{rel_var}.`{LAST_INGESTED_AT_PROPERTY}` >= "
-                "datetime() - duration({hours: $latest_hours})"
-            )
-
-        if not clauses:
-            return ""
-        return "WHERE " + " AND ".join(clauses)
+        return "WHERE " + " AND ".join(clauses) + "\n"
 
     def _filter_parameters(self) -> dict[str, object]:
         """Parameters required by any active filters."""
@@ -120,7 +106,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         return {"latest_hours": self.latest_hours}
 
     def get_node_type_extractor(self, node_type: str) -> Neo4jExtractor:
-        where = self._node_where_clause("n")
+        where = self._where_clause("n")
         return Neo4jExtractor(
             FETCH_ALL_NODES_BY_TYPE_QUERY_FORMAT.format(type=node_type, where=where),
             self.database_connection,
@@ -131,7 +117,7 @@ class Neo4jTypeRetriever(TypeRetriever):
     def get_relationships_of_type_bettween_extractor(
         self, from_node_type: str, to_node_type: str, relationship_type: str
     ) -> Neo4jExtractor:
-        where = self._relationship_where_clause("r")
+        where = self._where_clause("r")
         return Neo4jExtractor(
             FETCH_ALL_RELATIONSHIPS_BY_TYPE_BETWEEN_QUERY_FORMAT.format(
                 from_node_type=from_node_type,
@@ -146,21 +132,25 @@ class Neo4jTypeRetriever(TypeRetriever):
 
     async def preview_node_count(self, node_type: str) -> int:
         """Return a quick count of nodes of the given type."""
-        where = self._node_where_clause("n")
+        where = self._where_clause("n")
         statement = COUNT_NODES_BY_TYPE_QUERY_FORMAT.format(type=node_type, where=where)
-        query = Query(statement, self._filter_parameters() or {})
-        results = await self.database_connection.execute(query)
+        query = Query(statement, self._filter_parameters())
+        results = await self.database_connection.execute(
+            query, routing_=RoutingControl.READ
+        )
         first = next(iter(results), None)
         return int(first["count"]) if first is not None else 0
 
     async def preview_relationship_count(self, relationship_type: str) -> int:
         """Return a quick count of relationships of the given type."""
-        where = self._relationship_where_clause("r")
+        where = self._where_clause("r")
         statement = COUNT_RELATIONSHIPS_BY_TYPE_QUERY_FORMAT.format(
             relationship_type=relationship_type, where=where
         )
-        query = Query(statement, self._filter_parameters() or {})
-        results = await self.database_connection.execute(query)
+        query = Query(statement, self._filter_parameters())
+        results = await self.database_connection.execute(
+            query, routing_=RoutingControl.READ
+        )
         first = next(iter(results), None)
         return int(first["count"]) if first is not None else 0
 

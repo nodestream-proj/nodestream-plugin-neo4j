@@ -17,10 +17,7 @@ class Neo4jRecordWrapper(dict[str, Any]):
     """
 
     def __init__(self, record: Record) -> None:
-        # Preserve the original Record for contextual access.
         self.original = record
-        # Initialize the dict base class with the record data so that
-        # json.dumps can treat this as a normal dictionary.
         super().__init__(record.data())
 
     def __repr__(self) -> str:
