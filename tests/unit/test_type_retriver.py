@@ -54,9 +54,7 @@ def subject(mocker):
 def filtered_subject(mocker):
     """A retriever with both sampling and recency filters enabled."""
     connection = mocker.Mock(Neo4jDatabaseConnection)
-    return Neo4jTypeRetriever(
-        connection, limit=500, sample_ratio=5, latest_hours=24
-    )
+    return Neo4jTypeRetriever(connection, limit=500, sample_ratio=5, latest_hours=24)
 
 
 @pytest.fixture
@@ -99,7 +97,10 @@ def test_map_neo4j_relationship_to_nodestream_relationship(subject):
 
 def test_get_node_type_extractor(subject):
     extractor = subject.get_node_type_extractor("Person")
-    assert_that(extractor.query, equal_to("MATCH (n:Person)\nRETURN n SKIP $offset LIMIT $limit\n"))
+    assert_that(
+        extractor.query,
+        equal_to("MATCH (n:Person)\nRETURN n SKIP $offset LIMIT $limit\n"),
+    )
 
 
 def test_get_relationships_of_type_bettween_extractor(subject):
@@ -108,7 +109,9 @@ def test_get_relationships_of_type_bettween_extractor(subject):
     )
     assert_that(
         extractor.query,
-        equal_to("MATCH (a:Person)-[r:KNOWS]->(b:Company)\nRETURN a, r, b SKIP $offset LIMIT $limit\n"),
+        equal_to(
+            "MATCH (a:Person)-[r:KNOWS]->(b:Company)\nRETURN a, r, b SKIP $offset LIMIT $limit\n"
+        ),
     )
 
 
