@@ -1,7 +1,7 @@
 import pytest
-from hamcrest import assert_that, equal_to
+from hamcrest import assert_that, equal_to, has_length, is_
 
-from nodestream_plugin_neo4j.extractor import Neo4jExtractor
+from nodestream_plugin_neo4j.extractor import Neo4jExtractor, Neo4jRecordWrapper
 from nodestream_plugin_neo4j.neo4j_database import Neo4jDatabaseConnection
 from nodestream_plugin_neo4j.query import Query
 
@@ -14,6 +14,12 @@ class FakeRecord:
 
     def data(self):
         return self._payload
+
+    def keys(self):
+        return list(self._payload.keys())
+
+    def __getitem__(self, key):
+        return self._payload[key]
 
 
 @pytest.mark.asyncio
@@ -32,10 +38,14 @@ async def test_extract_records(mocker):
         [FakeRecord({"name": "test3"})],
         [],
     ]
-    result = [item async for item in extractor.extract_records()]
-    assert_that(
-        result, equal_to([{"name": "test1"}, {"name": "test2"}, {"name": "test3"}])
-    )
+    rows = [row async for row in extractor.extract_records()]
+    assert_that(rows, has_length(3))
+    # Should be our wrapper mapping view
+    assert isinstance(rows[0], Neo4jRecordWrapper)
+    names = [row["name"] for row in rows]
+    assert_that(names, equal_to(["test1", "test2", "test3"]))
+    # original should expose the underlying record with the same values
+    assert_that(rows[0].original["name"], is_("test1"))
 
     expected_query = Query(query, {"test": "test", "limit": 2, "offset": 0})
 

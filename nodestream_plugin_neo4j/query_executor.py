@@ -80,3 +80,7 @@ class Neo4jQueryExecutor(QueryExecutor):
     async def execute_hook(self, hook: IngestionHook):
         query_string, params = hook.as_cypher_query_and_parameters()
         await self.database_connection.execute(Query(query_string, params))
+
+    async def finish(self):
+        """Close the underlying database connection and its driver."""
+        await self.database_connection.close()

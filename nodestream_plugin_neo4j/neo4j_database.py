@@ -103,6 +103,15 @@ class Neo4jDatabaseConnection:
             return self.acquire_driver()
         return self._driver
 
+    async def close(self) -> None:
+        """Close the underlying Neo4j driver if it has been created."""
+        driver = self._driver
+        if driver is not None:
+            # Set to None first so any concurrent callers will see that the
+            # driver is already being closed and will no-op.
+            self._driver = None
+            await driver.close()
+
     def log_query_start(self, query: Query):
         if query.query_statement not in self.query_set:
             self.logger.info(
@@ -202,8 +211,9 @@ class Neo4jDatabaseConnection:
                     attempts,
                     exc_info=e,
                 )
-                # Block synchronously before retrying (do not yield to event loop).
+                # Back off before retrying and rotate the driver instance.
                 time.sleep(self.retry_factor * attempts)
+                await self.close()
                 self.acquire_driver()
                 if attempts >= self.max_retry_attempts:
                     raise e
