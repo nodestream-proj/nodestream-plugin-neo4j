@@ -1,5 +1,4 @@
-import time
-from dataclasses import dataclass as _unused_dataclass  # noqa: F401
+import asyncio
 from logging import getLogger
 from typing import Awaitable, Callable, Iterable, Tuple, Union
 
@@ -18,6 +17,7 @@ from neo4j import (
 from neo4j.auth_management import AsyncAuthManagers
 from neo4j.exceptions import (
     AuthError,
+    ClientError,
     ServiceUnavailable,
     SessionExpired,
     TransientError,
@@ -28,6 +28,16 @@ from .query import Query
 from .result import Neo4jQueryStatistics, Neo4jResult
 
 RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
+AUTH_RATE_LIMIT_CODE = "Neo.ClientError.Security.AuthenticationRateLimit"
+
+
+def is_retryable(e: Exception) -> bool:
+    if isinstance(e, RETRYABLE_EXCEPTIONS):
+        return True
+    # AuthenticationRateLimit is a ClientError (not AuthError) but is transient.
+    return (
+        isinstance(e, ClientError) and getattr(e, "code", None) == AUTH_RATE_LIMIT_CODE
+    )
 
 
 def convert_routing_control_to_access_mode(routing_control: RoutingControl) -> str:
@@ -92,33 +102,43 @@ class Neo4jDatabaseConnection:
         self.retry_factor = retry_factor
         self._driver: AsyncDriver | None = None
         self.query_set: set[str] = set()
+        self._driver_lock = asyncio.Lock()
 
-    def acquire_driver(self) -> AsyncDriver:
-        self._driver = self.driver_factory()
-        return self._driver
+    async def _get_driver(self) -> AsyncDriver:
+        """Return the current driver, waiting if a rotation is in progress."""
+        async with self._driver_lock:
+            if self._driver is None:
+                self._driver = self.driver_factory()
+            return self._driver
 
-    @property
-    def driver(self) -> AsyncDriver:
-        if self._driver is None:
-            return self.acquire_driver()
-        return self._driver
+    async def _rotate_driver(self, attempts: int) -> None:
+        """Close the current driver, back off, then create a fresh one.
+
+        Holds _driver_lock for the entire duration so concurrent _get_driver()
+        callers block until the fresh driver is ready.
+        """
+        async with self._driver_lock:
+            if self._driver is not None:
+                await self._driver.close()
+                self._driver = None
+            await asyncio.sleep(self.retry_factor * attempts)
+            self._driver = self.driver_factory()
 
     async def close(self) -> None:
         """Close the underlying Neo4j driver if it has been created."""
-        driver = self._driver
+        async with self._driver_lock:
+            driver, self._driver = self._driver, None
         if driver is not None:
-            # Set to None first so any concurrent callers will see that the
-            # driver is already being closed and will no-op.
-            self._driver = None
             await driver.close()
 
-    def log_query_start(self, query: Query):
+    async def log_query_start(self, query: Query):
         if query.query_statement not in self.query_set:
+            driver = await self._get_driver()
             self.logger.info(
                 "Executing Cypher Query to Neo4j.",
                 extra={
                     "query": query.query_statement,
-                    "uri": self.driver._pool.address.host,
+                    "uri": driver._pool.address.host,
                 },
             )
             self.query_set.add(query.query_statement)
@@ -144,7 +164,8 @@ class Neo4jDatabaseConnection:
         # the routing hint onto the appropriate access mode here.
         access_mode = convert_routing_control_to_access_mode(routing_)
 
-        async with self.driver.session(
+        driver = await self._get_driver()
+        async with driver.session(
             database=self.database_name,
             default_access_mode=access_mode,
         ) as session:
@@ -166,7 +187,8 @@ class Neo4jDatabaseConnection:
         routing_=RoutingControl.WRITE,
     ) -> Iterable[Record]:
         # TODO we need to use Neo4j's Query classes to avoid string interpolation in the future for injection protection.
-        native: EagerResult = await self.driver.execute_query(
+        driver = await self._get_driver()
+        native: EagerResult = await driver.execute_query(
             query.query_statement,
             query.parameters,
             database_=self.database_name,
@@ -199,24 +221,24 @@ class Neo4jDatabaseConnection:
         log_result: bool = False,
         routing_=RoutingControl.WRITE,
     ) -> Iterable[Record]:
-        self.log_query_start(query)
+        await self.log_query_start(query)
         attempts = 0
         while True:
             attempts += 1
             try:
                 return await self._execute_query(query, log_result, routing_)
-            except RETRYABLE_EXCEPTIONS as e:
+            except Exception as e:
+                if not is_retryable(e):
+                    raise
                 self.logger.warning(
-                    "Error executing query, retrying. Attempt %s",
+                    "Error executing query, rotating driver and backing off. Attempt %s",
                     attempts,
                     exc_info=e,
                 )
-                # Back off before retrying and rotate the driver instance.
-                time.sleep(self.retry_factor * attempts)
-                await self.close()
-                self.acquire_driver()
                 if attempts >= self.max_retry_attempts:
-                    raise e
+                    raise
+                await self._rotate_driver(attempts)
 
-    def session(self) -> AsyncSession:
-        return self.driver.session(database=self.database_name)
+    async def session(self) -> AsyncSession:
+        driver = await self._get_driver()
+        return driver.session(database=self.database_name)
