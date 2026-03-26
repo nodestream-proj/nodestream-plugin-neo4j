@@ -145,7 +145,7 @@ async def test_auth_provider_factory_with_static_values():
 
 
 @pytest.mark.asyncio
-async def test_execute_implicit_uses_session_run(
+async def test_execute_implicit_uses_session_run(  # covers _run_implicit_query via execute()
     database_connection, mock_driver, mocker
 ):
     # Build a query that should run implicitly

@@ -149,12 +149,14 @@ class Neo4jDatabaseConnection:
         log_result: bool = False,
         routing_=RoutingControl.WRITE,
     ) -> Iterable[Record]:
+        driver = await self._get_driver()
         if query.is_implicit:
-            return await self.execute_implicit_query(query, log_result, routing_)
-        return await self.execute_explicit_query(query, log_result, routing_)
+            return await self._run_implicit_query(driver, query, log_result, routing_)
+        return await self._run_explicit_query(driver, query, log_result, routing_)
 
-    async def execute_implicit_query(
+    async def _run_implicit_query(
         self,
+        driver: AsyncDriver,
         query: Query,
         log_result: bool = False,
         routing_=RoutingControl.WRITE,
@@ -164,7 +166,6 @@ class Neo4jDatabaseConnection:
         # the routing hint onto the appropriate access mode here.
         access_mode = convert_routing_control_to_access_mode(routing_)
 
-        driver = await self._get_driver()
         async with driver.session(
             database=self.database_name,
             default_access_mode=access_mode,
@@ -180,14 +181,14 @@ class Neo4jDatabaseConnection:
             result = Neo4jResult(query, records, keys_list, summary)
         return self._finalize_query_result(query, result, log_result)
 
-    async def execute_explicit_query(
+    async def _run_explicit_query(
         self,
+        driver: AsyncDriver,
         query: Query,
         log_result: bool = False,
         routing_=RoutingControl.WRITE,
     ) -> Iterable[Record]:
         # TODO we need to use Neo4j's Query classes to avoid string interpolation in the future for injection protection.
-        driver = await self._get_driver()
         native: EagerResult = await driver.execute_query(
             query.query_statement,
             query.parameters,
