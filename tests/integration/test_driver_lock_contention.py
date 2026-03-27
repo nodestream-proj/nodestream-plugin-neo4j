@@ -178,3 +178,105 @@ async def test_concurrent_callers_do_not_reuse_bad_driver(mocker):
         f"Good driver should have been called twice (A retry + B), "
         f"got {good_driver.execute_query.call_count}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 3 — rate limit window simulation: backoff must outlast the window
+# ---------------------------------------------------------------------------
+
+
+def _make_rate_limit_error() -> ClientError:
+    error = ClientError("too many attempts")
+    error._neo4j_code = AUTH_RATE_LIMIT_CODE
+    return error
+
+
+def make_time_gated_db(mocker, rate_limit_window: float, retry_factor: float, max_retry_attempts: int = 10) -> tuple:
+    """
+    Build a Neo4jDatabaseConnection whose driver factory raises
+    AuthenticationRateLimit until `rate_limit_window` seconds of virtual
+    time have elapsed (tracked via a patched asyncio.sleep), then returns a
+    good driver.
+
+    Returns (db, virtual_clock) so tests can inspect elapsed time.
+    """
+    virtual_clock = {"elapsed": 0.0}
+
+    async def fake_sleep(delay):
+        virtual_clock["elapsed"] += delay
+
+    mocker.patch("nodestream_plugin_neo4j.neo4j_database.asyncio.sleep", fake_sleep)
+
+    good_driver = make_good_driver(mocker)
+
+    def driver_factory():
+        if virtual_clock["elapsed"] < rate_limit_window:
+            driver = mocker.AsyncMock(AsyncDriver)
+            driver.execute_query.side_effect = _make_rate_limit_error()
+            return driver
+        return good_driver
+
+    db = Neo4jDatabaseConnection(
+        driver_factory=driver_factory,
+        database_name="neo4j",
+        max_retry_attempts=max_retry_attempts,
+        retry_factor=retry_factor,
+    )
+    return db, virtual_clock, good_driver
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_insufficient_backoff_exhausts_retries_inside_rate_limit_window(mocker):
+    """
+    When retry_factor is too small, all retry attempts occur within the
+    rate limit window and every driver factory call returns a bad driver.
+    execute() must exhaust max_retry_attempts and re-raise the error —
+    proving that a pod restarting with tiny backoff stays in the crash loop.
+
+    Window: 30s.  retry_factor=1 → total backoff = 1+2+3 = 6s < 30s.
+    """
+    WINDOW = 30.0
+    db, clock, good_driver = make_time_gated_db(
+        mocker, rate_limit_window=WINDOW, retry_factor=1, max_retry_attempts=3
+    )
+
+    with pytest.raises(ClientError) as exc_info:
+        await db.execute(A_QUERY)
+
+    assert exc_info.value.code == AUTH_RATE_LIMIT_CODE, (
+        "Should have re-raised the AuthenticationRateLimit error"
+    )
+    assert clock["elapsed"] < WINDOW, (
+        f"Total backoff {clock['elapsed']}s should be less than window {WINDOW}s — "
+        f"all retries happened inside the rate limit window"
+    )
+    assert good_driver.execute_query.call_count == 0, (
+        "Good driver should never have been reached"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_sufficient_backoff_outlasts_rate_limit_window(mocker):
+    """
+    When retry_factor is large enough that the cumulative backoff exceeds
+    the rate limit window, the driver factory eventually returns a good driver
+    and execute() succeeds — proving that sufficient backoff breaks the loop.
+
+    Window: 30s.  retry_factor=30 → first backoff = 30s >= window.
+    """
+    WINDOW = 30.0
+    db, clock, good_driver = make_time_gated_db(
+        mocker, rate_limit_window=WINDOW, retry_factor=30, max_retry_attempts=3
+    )
+
+    await db.execute(A_QUERY)
+
+    assert clock["elapsed"] >= WINDOW, (
+        f"Total backoff {clock['elapsed']}s should have reached or exceeded "
+        f"the {WINDOW}s rate limit window"
+    )
+    assert good_driver.execute_query.call_count == 1, (
+        "Good driver should have been called exactly once after backoff cleared the window"
+    )
