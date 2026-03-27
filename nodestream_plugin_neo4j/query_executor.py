@@ -65,10 +65,8 @@ class Neo4jQueryExecutor(QueryExecutor):
                 shape, relationships
             )
         )
-        await self.database_connection.execute(
-            batched_query.as_query(self.ingest_query_builder.apoc_iterate),
-            log_result=True,
-        )
+        # Use shared batch helper so chunk_size/parallel/retries apply to rels too.
+        await self.execute_query_batch(batched_query)
 
     async def perform_ttl_op(self, config: TimeToLiveConfiguration):
         query = self.ingest_query_builder.generate_ttl_query_from_configuration(

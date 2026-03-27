@@ -1,5 +1,5 @@
 from logging import getLogger
-from typing import Any, AsyncGenerator, Dict, Iterator, Mapping, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from neo4j import Record, RoutingControl
 from nodestream.pipeline import Extractor
@@ -8,22 +8,20 @@ from .neo4j_database import Neo4jDatabaseConnection
 from .query import Query
 
 
-class Neo4jRecordWrapper(Mapping[str, Any]):
+class Neo4jRecordWrapper(dict[str, Any]):
+    """Thin wrapper around a Neo4j Record that is JSON-serializable.
+
+    - Behaves as a plain dict for serialization / downstream consumers.
+    - Keeps a reference to the original Record object for callers that
+      need driver-specific metadata.
+    """
+
     def __init__(self, record: Record) -> None:
-        self.original = record  # Maintained Context Object
-        self.data = record.data()  # Dictionary accessible view of the record.
-
-    def __getitem__(self, key: str) -> Any:
-        return self.data[key]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self.data)
-
-    def __len__(self) -> int:
-        return len(self.data)
+        self.original = record
+        super().__init__(record.data())
 
     def __repr__(self) -> str:
-        return f"Neo4jRecordWrapper(data={self.data})"
+        return f"Neo4jRecordWrapper(data={dict(self)})"
 
 
 class Neo4jExtractor(Extractor):
@@ -57,10 +55,6 @@ class Neo4jExtractor(Extractor):
 
         while should_continue:
             params = dict(**self.parameters, limit=self.limit, offset=offset)
-            self.logger.info(
-                "Running query on neo4j",
-                extra=dict(query=self.query, params=params),
-            )
 
             query = Query(
                 self.query,

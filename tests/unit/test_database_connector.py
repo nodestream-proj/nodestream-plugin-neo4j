@@ -1,6 +1,8 @@
-from hamcrest import assert_that, equal_to
+from hamcrest import assert_that, equal_to, is_
 
 from nodestream_plugin_neo4j import Neo4jDatabaseConnector
+from nodestream_plugin_neo4j.query_executor import Neo4jQueryExecutor
+from nodestream_plugin_neo4j.type_retriever import Neo4jTypeRetriever
 
 
 def test_make_query_executor(mocker):
@@ -10,18 +12,41 @@ def test_make_query_executor(mocker):
         use_enterprise_features=True,
     )
     executor = connector.make_query_executor()
+    assert isinstance(executor, Neo4jQueryExecutor)
     assert_that(executor.database_connection, equal_to(connector.database_connection))
-    assert_that(executor.ingest_query_builder.apoc_iterate, equal_to(True))
+    assert_that(executor.ingest_query_builder.apoc_iterate, is_(True))
 
 
-def test_make_type_retriever(mocker):
+def test_make_type_retriever_defaults(mocker):
     connector = Neo4jDatabaseConnector(
         database_connection=mocker.Mock(),
         use_apoc=True,
         use_enterprise_features=True,
     )
     retriever = connector.make_type_retriever()
+    assert isinstance(retriever, Neo4jTypeRetriever)
     assert_that(retriever.database_connection, equal_to(connector.database_connection))
+    assert_that(retriever.limit, equal_to(1000))
+    assert_that(retriever.sample_ratio, equal_to(None))
+    assert_that(retriever.latest_hours, equal_to(None))
+
+
+def test_make_type_retriever_with_filters(mocker):
+    connector = Neo4jDatabaseConnector(
+        database_connection=mocker.Mock(),
+        use_apoc=True,
+        use_enterprise_features=True,
+    )
+    retriever = connector.make_type_retriever(
+        limit=500,
+        sample_ratio=3,
+        latest_hours=24,
+    )
+    assert isinstance(retriever, Neo4jTypeRetriever)
+    assert_that(retriever.database_connection, equal_to(connector.database_connection))
+    assert_that(retriever.limit, equal_to(500))
+    assert_that(retriever.sample_ratio, equal_to(3))
+    assert_that(retriever.latest_hours, equal_to(24))
 
 
 def test_from_file_data_no_enterprise_features():

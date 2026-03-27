@@ -73,8 +73,16 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
             retries_per_chunk=self.retries_per_chunk,
         )
 
-    def make_type_retriever(self) -> TypeRetriever:
-        return Neo4jTypeRetriever(self.database_connection)
+    def make_type_retriever(self, **kwargs) -> TypeRetriever:
+        limit: int = kwargs.pop("limit", 1000)
+        sample_ratio: int | None = kwargs.pop("sample_ratio", None)
+        latest_hours: int | None = kwargs.pop("latest_hours", None)
+        return Neo4jTypeRetriever(
+            self.database_connection,
+            limit,
+            sample_ratio=sample_ratio,
+            latest_hours=latest_hours,
+        )
 
     def make_migrator(self) -> Migrator:
         return Neo4jMigrator(

@@ -18,16 +18,21 @@ SOME_RECORDS = [
 
 
 @pytest.fixture
-def database_connection(mocker):
-    return Neo4jDatabaseConnection(
-        lambda: mocker.AsyncMock(AsyncDriver), "neo4j", 2, 0.1
-    )
+def mock_driver(mocker):
+    return mocker.AsyncMock(AsyncDriver)
+
+
+@pytest.fixture
+def database_connection(mock_driver):
+    db = Neo4jDatabaseConnection(lambda: mock_driver, "neo4j", 2, 0.1)
+    db._driver = mock_driver
+    return db
 
 
 @pytest.mark.asyncio
-async def test_execute(database_connection, mocker):
+async def test_execute(database_connection, mock_driver, mocker):
     # Mock driver result with required attributes
-    driver_result = database_connection.driver.execute_query.return_value
+    driver_result = mock_driver.execute_query.return_value
     driver_result.records = SOME_RECORDS
     driver_result.keys = ["n"]
     # Summary with timings and empty counters
@@ -50,7 +55,7 @@ async def test_execute(database_connection, mocker):
     driver_result.summary = summary
     result = await database_connection.execute(A_QUERY, log_result=True)
     assert_that(result, equal_to(SOME_RECORDS))
-    database_connection.driver.execute_query.assert_called_once_with(
+    mock_driver.execute_query.assert_called_once_with(
         A_QUERY.query_statement,
         A_QUERY.parameters,
         database_="neo4j",
@@ -60,10 +65,7 @@ async def test_execute(database_connection, mocker):
 
 @pytest.mark.asyncio
 async def test_execute_fail_and_then_succeed(database_connection, mocker):
-    database_connection.acquire_driver = mocker.Mock(
-        wraps=database_connection.acquire_driver
-    )
-    # First call fails, second call returns a proper driver result
+    # First driver raises a transient error; second driver succeeds.
     driver_result = mocker.Mock()
     driver_result.records = SOME_RECORDS
     driver_result.keys = ["n"]
@@ -83,13 +85,23 @@ async def test_execute_fail_and_then_succeed(database_connection, mocker):
     counters.indexes_added = 0
     counters.indexes_removed = 0
     summary.counters = counters
-    driver_result.summary = summary
-    database_connection.driver.execute_query.side_effect = [
-        TransientError("Failed to execute query"),
-        driver_result,
-    ]
+
+    failing_driver = mocker.AsyncMock(AsyncDriver)
+    failing_driver.execute_query.side_effect = TransientError("Failed to execute query")
+    succeeding_driver = mocker.AsyncMock(AsyncDriver)
+    succeeding_driver.execute_query.return_value = driver_result
+
+    call_count = 0
+
+    def driver_factory():
+        nonlocal call_count
+        call_count += 1
+        return failing_driver if call_count == 1 else succeeding_driver
+
+    database_connection._driver = None
+    database_connection.driver_factory = driver_factory
     await database_connection.execute(A_QUERY)
-    assert_that(database_connection.acquire_driver.call_count, equal_to(2))
+    assert_that(call_count, equal_to(2))
 
 
 @pytest.mark.asyncio
@@ -99,16 +111,17 @@ async def test_execute_fail_and_then_fail(database_connection, mocker):
         driver.execute_query.side_effect = TransientError("Failed to execute query")
         return driver
 
+    database_connection._driver = None
     database_connection.driver_factory = driver_factory
     with pytest.raises(TransientError):
         await database_connection.execute(A_QUERY)
 
 
 @pytest.mark.asyncio
-async def test_session(database_connection):
-    session = database_connection.session()
-    assert_that(session, equal_to(database_connection.driver.session.return_value))
-    database_connection.driver.session.assert_called_once_with(database="neo4j")
+async def test_session(database_connection, mock_driver):
+    session = await database_connection.session()
+    assert_that(session, equal_to(mock_driver.session.return_value))
+    mock_driver.session.assert_called_once_with(database="neo4j")
 
 
 @pytest.mark.asyncio
@@ -132,7 +145,9 @@ async def test_auth_provider_factory_with_static_values():
 
 
 @pytest.mark.asyncio
-async def test_execute_implicit_uses_session_run(database_connection, mocker):
+async def test_execute_implicit_uses_session_run(  # covers _run_implicit_query via execute()
+    database_connection, mock_driver, mocker
+):
     # Build a query that should run implicitly
     implicit_query = Query.from_statement(
         "MATCH (n) RETURN n LIMIT $limit", is_implicit=True, limit=2
@@ -167,15 +182,15 @@ async def test_execute_implicit_uses_session_run(database_connection, mocker):
     session_cm.__aenter__.return_value = session_cm
     session_cm.__aexit__.return_value = False
     session_cm.run = mocker.AsyncMock(return_value=async_result)
-    database_connection.driver.session.return_value = session_cm
+    mock_driver.session.return_value = session_cm
 
     # Execute
     result = await database_connection.execute(implicit_query, log_result=True)
 
     # Assert records collected and driver.execute_query not used
     assert_that(result, equal_to(SOME_RECORDS))
-    database_connection.driver.execute_query.assert_not_called()
-    database_connection.driver.session.assert_called_once()
+    mock_driver.execute_query.assert_not_called()
+    mock_driver.session.assert_called_once()
     session_cm.run.assert_called_once_with(
         implicit_query.query_statement, parameters=implicit_query.parameters
     )
