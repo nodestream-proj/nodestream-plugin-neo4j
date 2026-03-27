@@ -2,24 +2,19 @@
 Zombie pipeline reproduction test.
 
 Replicates the mds-github-repos perpetual pipeline failure mode observed in
-production on 2026-03-20:
+production on 2026-03-20 using the *exact* production components:
 
-  - StreamExtractor yields records
-  - Interpreter passes them through
-  - GraphDatabaseWriter flushes to Neo4j
-  - Neo4j raises AuthenticationRateLimit
-  - Nodestream marks the error fatal and shuts the pipeline down gracefully
-  - The PROCESS STAYS ALIVE — the exception is swallowed somewhere in the
-    nodestream pipeline runner before it can reach sys.exit()
+  StreamExtractor (stub Kafka connector)
+    → Interpreter (real interpretations from mds-github-repos.yaml)
+    → GraphDatabaseWriter
+    → Neo4jDatabaseConnection (always raises AuthenticationRateLimit)
 
-The test builds a minimal version of the pipeline using the same components
-as mds-github-repos (stubbed extractor, passthrough interpreter, real
-GraphDatabaseWriter backed by a Neo4jDatabaseConnection that always raises
-AuthenticationRateLimit) and runs it through nodestream's actual Pipeline.run()
-to prove the zombie behaviour and pinpoint where the exception dies.
+The test proves whether the fatal AuthenticationRateLimit error propagates
+all the way out of Pipeline.run() so the process can exit, or whether it is
+swallowed somewhere — leaving the process alive with a dead pipeline (zombie).
 """
 
-from typing import AsyncGenerator
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -27,9 +22,13 @@ from neo4j import AsyncDriver
 from neo4j.exceptions import ClientError
 from nodestream.databases.debounced_ingest_strategy import DebouncedIngestStrategy
 from nodestream.databases.writer import GraphDatabaseWriter
-from nodestream.model import Node
+from nodestream.interpreting import Interpreter
 from nodestream.pipeline import Pipeline
-from nodestream.pipeline.extractors.extractor import Extractor
+from nodestream.pipeline.extractors.streams.extractor import (
+    StreamConnector,
+    StreamExtractor,
+    StreamRecordFormat,
+)
 from nodestream.pipeline.object_storage import NullObjectStore
 from nodestream.pipeline.progress_reporter import PipelineProgressReporter
 
@@ -39,6 +38,58 @@ from nodestream_plugin_neo4j.neo4j_database import (
 )
 from nodestream_plugin_neo4j.query import QueryBatch
 from nodestream_plugin_neo4j.query_executor import Neo4jQueryExecutor
+
+# ---------------------------------------------------------------------------
+# Stub connector / format — stand-ins for the real Kafka eventbus connector
+# ---------------------------------------------------------------------------
+
+# A minimal record matching the GithubRepo shape the Interpreter expects
+STUB_RECORD = {
+    "url": "https://github.com/example/repo",
+    "nameWithOwner": "example/repo",
+    "name": "repo",
+    "databaseId": 1,
+    "defaultBranchRef": {"name": "main"},
+    "createdAt": "2021-01-01T00:00:00Z",
+    "pushedAt": "2021-01-01T00:00:00Z",
+    "isArchived": False,
+    "isFork": False,
+    "owner": {"login": "example"},
+    "collaborators": [],
+    "languages": [],
+    "asset_id_from_marco": None,
+}
+
+
+class StubConnector(StreamConnector, alias="stub_zombie"):
+    """Yields a fixed batch of records once, then returns empty batches.
+
+    The first call to poll() returns RECORD_COUNT records.
+    Subsequent calls return [] (simulating a quiet Kafka topic after a burst).
+    """
+
+    RECORD_COUNT = 3
+
+    def __init__(self):
+        self._polled = False
+
+    async def connect(self):
+        pass
+
+    async def disconnect(self):
+        pass
+
+    async def poll(self):
+        if not self._polled:
+            self._polled = True
+            return [json.dumps(STUB_RECORD)] * self.RECORD_COUNT
+        return []
+
+
+class StubFormat(StreamRecordFormat, alias="stub_json_zombie"):
+    def parse(self, record):
+        return json.loads(record)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,7 +110,6 @@ def _make_always_failing_db() -> Neo4jDatabaseConnection:
     def driver_factory():
         driver = MagicMock(AsyncDriver)
         driver.execute_query = AsyncMock(side_effect=_make_rate_limit_error())
-        # session() needs to return an async context manager for implicit queries
         session_cm = AsyncMock()
         session_cm.__aenter__.return_value = session_cm
         session_cm.__aexit__.return_value = False
@@ -71,43 +121,34 @@ def _make_always_failing_db() -> Neo4jDatabaseConnection:
     return Neo4jDatabaseConnection(
         driver_factory=driver_factory,
         database_name="neo4j",
-        max_retry_attempts=1,  # fail fast — we want to observe the fatal error
+        max_retry_attempts=1,
         retry_factor=0,
     )
 
 
-class StubIngestible:
-    """A minimal ingestible that queues a node into the debouncer and flushes,
-    which triggers the Neo4j query — and therefore the auth error."""
-
-    async def ingest(self, strategy):
-        await strategy.ingest_source_node(
-            Node(type="GithubRepo", key_values={"url": "https://example.com"})
-        )
-        await strategy.flush()
-
-
-class StubExtractor(Extractor):
-    """Yields a small number of ingestible records then stops — like a
-    StreamExtractor that received a batch from Kafka.
-
-    Uses Extractor.emit_outstanding_records / extract_records so the pipeline
-    runner actually sees the emitted records.
-    """
-
-    def __init__(self, record_count: int = 3):
-        self.record_count = record_count
-
-    async def extract_records(self) -> AsyncGenerator:
-        for _ in range(self.record_count):
-            yield StubIngestible()
-
-
 def _make_pipeline(db: Neo4jDatabaseConnection) -> Pipeline:
+    # Real StreamExtractor with stub connector — same class as production
+    extractor = StreamExtractor(
+        connector=StubConnector(),
+        record_format=StubFormat(),
+    )
+
+    # Real Interpreter — same class as production, simplified interpretations
+    interpreter = Interpreter.from_file_data(
+        interpretations=[
+            [
+                {
+                    "type": "source_node",
+                    "node_type": "GithubRepo",
+                    "key": {"url": "!jmespath 'url'"},
+                },
+            ]
+        ]
+    )
+
+    # Real GraphDatabaseWriter backed by the always-failing db
     ingest_query_builder = MagicMock()
-    ingest_query_builder.apoc_iterate = False  # QueryBatch.as_query does bool lookup
-    # generate_batch_update_node_operation_batch must return a real QueryBatch so
-    # QueryBatch.as_query() produces a real Query (not a MagicMock with truthy is_implicit)
+    ingest_query_builder.apoc_iterate = False
     ingest_query_builder.generate_batch_update_node_operation_batch.return_value = (
         QueryBatch(query_statement="MATCH (n) RETURN n", batched_parameter_sets=[{}])
     )
@@ -119,12 +160,12 @@ def _make_pipeline(db: Neo4jDatabaseConnection) -> Pipeline:
     )
     ingest_strategy = DebouncedIngestStrategy(query_executor)
     writer = GraphDatabaseWriter(
-        batch_size=1,  # flush after every record so auth error fires immediately
+        batch_size=1,
         ingest_strategy=ingest_strategy,
     )
-    extractor = StubExtractor(record_count=3)
+
     return Pipeline(
-        steps=(extractor, writer),
+        steps=(extractor, interpreter, writer),
         step_outbox_size=10,
         object_store=NullObjectStore(),
     )
@@ -132,11 +173,8 @@ def _make_pipeline(db: Neo4jDatabaseConnection) -> Pipeline:
 
 def _make_reporter() -> tuple[PipelineProgressReporter, dict]:
     """
-    Returns a reporter wired the same way the nodestream CLI wires it for
-    production JSON logging: on_fatal_error stores the exception,
-    on_finish raises it.
-
-    Also returns a state dict so tests can inspect what happened.
+    Reporter wired the same way as the nodestream CLI production JSON logging:
+    on_fatal_error stores the exception, on_finish raises it.
     """
     state = {
         "fatal_error": None,
@@ -173,6 +211,9 @@ async def test_fatal_auth_error_propagates_out_of_pipeline_run():
     Proves that when GraphDatabaseWriter raises AuthenticationRateLimit,
     nodestream's pipeline runner propagates the exception all the way out
     of Pipeline.run() so the process can exit.
+
+    Uses the exact production pipeline shape:
+      StreamExtractor → Interpreter → GraphDatabaseWriter
 
     If this test FAILS (no exception raised), it reproduces the zombie:
     the pipeline died internally but Pipeline.run() returned normally,
@@ -218,9 +259,11 @@ async def test_fatal_auth_error_propagates_out_of_pipeline_run():
 async def test_zombie_pipeline_process_stays_alive_after_fatal_error():
     """
     Directly reproduces the production zombie: runs the pipeline through the
-    same call chain as the nodestream CLI (pipeline.run → reporter callbacks)
-    and asserts that Pipeline.run() returns WITHOUT raising when the production
-    JSON indicator pattern is used.
+    same call chain as the nodestream CLI and asserts that Pipeline.run()
+    returns WITHOUT raising when a fatal error occurs.
+
+    Uses the exact production pipeline shape:
+      StreamExtractor → Interpreter → GraphDatabaseWriter
 
     If this test PASSES it confirms the zombie exists.
     If it FAILS (exception escapes) the zombie is fixed.
@@ -235,8 +278,6 @@ async def test_zombie_pipeline_process_stays_alive_after_fatal_error():
     except Exception:
         pipeline_run_raised = True
 
-    # In the zombie scenario the pipeline reported a fatal error internally
-    # but Pipeline.run() returned normally — the process lives on with nothing to do.
     if not pipeline_run_raised:
         pytest.fail(
             "ZOMBIE CONFIRMED: Pipeline.run() returned normally after a fatal "
