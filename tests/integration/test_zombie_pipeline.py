@@ -9,11 +9,17 @@ production on 2026-03-20 using the *exact* production components:
     → GraphDatabaseWriter
     → Neo4jDatabaseConnection (always raises AuthenticationRateLimit)
 
-The test proves whether the fatal AuthenticationRateLimit error propagates
-all the way out of Pipeline.run() so the process can exit, or whether it is
-swallowed somewhere — leaving the process alive with a dead pipeline (zombie).
+Two failure modes are tested:
+
+1. Exception propagation — does the fatal error escape Pipeline.run()?
+
+2. Extractor task leak — after Pipeline.run() exits (with or without raising),
+   is the StreamExtractor task still running?  In production the extractor
+   blocks forever on Kafka poll(), so a leaked task keeps the process alive
+   even after the writer has fatally failed.  This is the zombie.
 """
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -62,16 +68,22 @@ STUB_RECORD = {
 
 
 class StubConnector(StreamConnector, alias="stub_zombie"):
-    """Yields a fixed batch of records once, then returns empty batches.
+    """Mimics the production Kafka connector behaviour:
 
-    The first call to poll() returns RECORD_COUNT records.
-    Subsequent calls return [] (simulating a quiet Kafka topic after a burst).
+    - First poll() returns RECORD_COUNT records (the burst that triggers the auth error).
+    - All subsequent poll() calls block forever on an asyncio.Event that is
+      never set — exactly like a real Kafka consumer waiting for the next
+      message.  This means the StreamExtractor task will never finish on its
+      own, which is what keeps the process alive in production after the
+      writer has already failed fatally.
     """
 
     RECORD_COUNT = 3
 
     def __init__(self):
         self._polled = False
+        # Never set — simulates a Kafka topic with no new messages.
+        self._block_forever = asyncio.Event()
 
     async def connect(self):
         pass
@@ -83,7 +95,9 @@ class StubConnector(StreamConnector, alias="stub_zombie"):
         if not self._polled:
             self._polled = True
             return [json.dumps(STUB_RECORD)] * self.RECORD_COUNT
-        return []
+        # Block indefinitely — like a real Kafka consumer waiting for messages.
+        await self._block_forever.wait()
+        return []  # unreachable, but satisfies the return type
 
 
 class StubFormat(StreamRecordFormat, alias="stub_json_zombie"):
@@ -285,3 +299,51 @@ async def test_zombie_pipeline_process_stays_alive_after_fatal_error():
             f"finished={state['finished']}, finish_raised={state['finish_raised']}. "
             "The process would stay alive indefinitely — this is the production bug."
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_extractor_task_leaks_after_fatal_writer_error():
+    """
+    Reproduces the exact production zombie mechanism:
+
+    The StreamExtractor polls Kafka in an infinite while-True loop.  After the
+    writer fails fatally and Pipeline.run() exits, the extractor task is NOT
+    cancelled — it is still blocked on poll(), keeping the event loop (and the
+    process) alive indefinitely.
+
+    StubConnector blocks forever on the second poll() call, mirroring a real
+    Kafka consumer waiting for the next message.
+
+    The test asserts that at least one asyncio task is still running after
+    Pipeline.run() returns.  If this PASSES the zombie is confirmed.
+    If all tasks are done the leak has been fixed.
+    """
+    tasks_before = set(asyncio.all_tasks())
+
+    db = _make_always_failing_db()
+    pipeline = _make_pipeline(db)
+    reporter, state = _make_reporter()
+
+    try:
+        await pipeline.run(reporter)
+    except Exception:
+        pass
+
+    # Any task that was created during pipeline.run() and is still running
+    # after it returned is a leaked task — a zombie coroutine.
+    leaked_tasks = asyncio.all_tasks() - tasks_before - {asyncio.current_task()}
+
+    # Clean up so the event loop doesn't complain after the test.
+    for task in leaked_tasks:
+        task.cancel()
+    if leaked_tasks:
+        await asyncio.gather(*leaked_tasks, return_exceptions=True)
+
+    assert leaked_tasks, (
+        "ZOMBIE CONFIRMED: after Pipeline.run() returned, "
+        f"{len(leaked_tasks)} task(s) were still running. "
+        "The StreamExtractor is blocked in its infinite poll() loop — "
+        "in production this keeps the process alive after a fatal writer failure.\n"
+        + "\n".join(f"  {t.get_name()}: {t.get_coro()}" for t in leaked_tasks)
+    )
