@@ -50,6 +50,7 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         execute_chunks_in_parallel: bool = True,
         retries_per_chunk: int = 3,
         set_first_ingested_at: bool = False,
+        transaction_batch_size: int = 10000,
     ) -> None:
         self.use_enterprise_features = use_enterprise_features
         self.use_apoc = use_apoc
@@ -58,6 +59,7 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         self.execute_chunks_in_parallel = execute_chunks_in_parallel
         self.retries_per_chunk = retries_per_chunk
         self.set_first_ingested_at = set_first_ingested_at
+        self.transaction_batch_size = transaction_batch_size
 
     def make_query_executor(self) -> QueryExecutor:
         query_builder = Neo4jIngestQueryBuilder(
@@ -71,8 +73,20 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
             retries_per_chunk=self.retries_per_chunk,
         )
 
-    def make_type_retriever(self) -> TypeRetriever:
-        return Neo4jTypeRetriever(self.database_connection)
+    def make_type_retriever(self, **kwargs) -> TypeRetriever:
+        limit: int = kwargs.pop("limit", 1000)
+        sample_ratio: int | None = kwargs.pop("sample_ratio", None)
+        latest_hours: int | None = kwargs.pop("latest_hours", None)
+        return Neo4jTypeRetriever(
+            self.database_connection,
+            limit,
+            sample_ratio=sample_ratio,
+            latest_hours=latest_hours,
+        )
 
     def make_migrator(self) -> Migrator:
-        return Neo4jMigrator(self.database_connection, self.use_enterprise_features)
+        return Neo4jMigrator(
+            self.database_connection,
+            self.use_enterprise_features,
+            self.transaction_batch_size,
+        )

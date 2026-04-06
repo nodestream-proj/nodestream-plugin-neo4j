@@ -280,27 +280,20 @@ def test_neo4j_query_statistics_from_result_with_apoc_no_update_stats():
 def test_neo4j_result_initialization():
     query = Query("MATCH (n) RETURN n", {})
 
-    # Mock EagerResult
-    mock_result = Mock()
-    mock_result.records = [Mock(), Mock()]
-    mock_result.keys = ["n"]
-    mock_result.summary = Mock()
+    records = [{"n": {"name": "foo"}}, {"n": {"name": "bar"}}]
+    keys = ["n"]
+    summary = Mock()
 
-    result = Neo4jResult(query, mock_result)
+    result = Neo4jResult(query, records, keys, summary)
 
     assert_that(result.query, equal_to(query))
-    assert_that(result.records, equal_to(mock_result.records))
+    assert_that(result.records, equal_to(records))
     assert_that(result.keys, equal_to(["n"]))
-    assert_that(result.summary, equal_to(mock_result.summary))
+    assert_that(result.summary, equal_to(summary))
 
 
 def test_neo4j_result_obtain_query_statistics_non_apoc():
     query = Query("MATCH (n) RETURN n", {}, is_apoc=False)
-
-    # Mock EagerResult
-    mock_result = Mock()
-    mock_result.records = []
-    mock_result.keys = ["n"]
 
     # Mock summary
     mock_summary = Mock()
@@ -320,9 +313,7 @@ def test_neo4j_result_obtain_query_statistics_non_apoc():
     mock_counters.indexes_added = 0
     mock_counters.indexes_removed = 0
     mock_summary.counters = mock_counters
-    mock_result.summary = mock_summary
-
-    result = Neo4jResult(query, mock_result)
+    result = Neo4jResult(query, [], ["n"], mock_summary)
     stats = result.obtain_query_statistics()
 
     assert_that(stats.timing.planning_time_ms, equal_to(30))
@@ -345,19 +336,12 @@ def test_neo4j_result_obtain_query_statistics_apoc_query(mocker):
 
     query = Query("CALL apoc.test()", {}, is_apoc=True)
 
-    # Mock EagerResult with records
-    mock_result = Mock()
-    mock_result.records = MOCK_APOC_RECORD
-    mock_result.keys = ["result"]
-
     # Mock summary
     mock_summary = Mock()
     mock_summary.query_type = "write"
     mock_summary.result_available_after = 40
     mock_summary.result_consumed_after = 60
-    mock_result.summary = mock_summary
-
-    result = Neo4jResult(query, mock_result)
+    result = Neo4jResult(query, MOCK_APOC_RECORD, ["result"], mock_summary)
     stats = result.obtain_query_statistics()
 
     assert_that(stats.timing.apoc_time_ms, equal_to(1000))

@@ -63,13 +63,10 @@ async def test_upsert_nodes_in_bulk_of_same_operation(query_executor, some_query
 
 
 @pytest.mark.asyncio
-async def test_upsert_rel_in_bulk_of_same_shape(
-    mocker, query_executor, some_query_batch
-):
+async def test_upsert_rel_in_bulk_of_same_shape(query_executor, some_query_batch):
     query_executor.ingest_query_builder.generate_batch_update_relationship_query_batch.return_value = (
         some_query_batch
     )
-    query_executor.execute = mocker.AsyncMock()
     await query_executor.upsert_relationships_in_bulk_of_same_operation(None, None)
     query_executor.ingest_query_builder.generate_batch_update_relationship_query_batch.assert_called_once_with(
         None, None

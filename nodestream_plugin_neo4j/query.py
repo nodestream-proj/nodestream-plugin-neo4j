@@ -65,10 +65,13 @@ class Query:
     query_statement: str
     parameters: dict[str, Any]
     is_apoc: bool = False  # Indicates if this is an APOC query
+    is_implicit: bool = False  # Run this query in an implicit transaction
 
     @classmethod
-    def from_statement(cls, query_statement: str, **parameters: Any) -> "Query":
-        return cls(query_statement, parameters)
+    def from_statement(
+        cls, query_statement: str, *, is_implicit: bool = False, **parameters: Any
+    ) -> "Query":
+        return cls(query_statement, parameters, False, is_implicit)
 
     def feed_batched_query(
         self,

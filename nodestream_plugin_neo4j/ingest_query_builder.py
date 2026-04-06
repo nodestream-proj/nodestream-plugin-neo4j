@@ -98,7 +98,9 @@ def _make_relationship(
     creation_rule: RelationshipCreationRule,
     set_first_ingested_at: bool,
 ):
-    keys = generate_properties_set_with_prefix(rel_identity.keys, RELATIONSHIP_REF_NAME)
+    keys = generate_properties_set_with_prefix(
+        (rel_identity.keys), RELATIONSHIP_REF_NAME
+    )
     merge_rel_query = (
         QueryBuilder()
         .merge()
@@ -241,6 +243,8 @@ class Neo4jIngestQueryBuilder:
         return QueryBatch(query, params)
 
     def generate_ttl_match_query(self, config: TimeToLiveConfiguration) -> Query:
+        if config.expiry_in_hours is None:
+            raise ValueError("Expiry in hours must be set for TTL configuration")
         earliest_allowed_time = Timestamp.utcnow() - Timedelta(
             hours=config.expiry_in_hours
         )

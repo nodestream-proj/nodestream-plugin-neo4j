@@ -1,11 +1,27 @@
 from logging import getLogger
-from typing import Any, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
-from neo4j import RoutingControl
+from neo4j import Record, RoutingControl
 from nodestream.pipeline import Extractor
 
 from .neo4j_database import Neo4jDatabaseConnection
 from .query import Query
+
+
+class Neo4jRecordWrapper(dict[str, Any]):
+    """Thin wrapper around a Neo4j Record that is JSON-serializable.
+
+    - Behaves as a plain dict for serialization / downstream consumers.
+    - Keeps a reference to the original Record object for callers that
+      need driver-specific metadata.
+    """
+
+    def __init__(self, record: Record) -> None:
+        self.original = record
+        super().__init__(record.data())
+
+    def __repr__(self) -> str:
+        return f"Neo4jRecordWrapper(data={dict(self)})"
 
 
 class Neo4jExtractor(Extractor):
@@ -27,24 +43,23 @@ class Neo4jExtractor(Extractor):
         parameters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
     ) -> None:
-        self.database_connection = database_connection
+        self.database_connection: Neo4jDatabaseConnection = database_connection
         self.query = query
-        self.parameters = parameters or {}
+        self.parameters: dict[str, Any] = parameters or {}
         self.limit = limit
         self.logger = getLogger(self.__class__.__name__)
 
-    async def extract_records(self):
+    async def extract_records(self) -> AsyncGenerator[Neo4jRecordWrapper, None]:
         offset = 0
         should_continue = True
 
         while should_continue:
             params = dict(**self.parameters, limit=self.limit, offset=offset)
-            self.logger.info(
-                "Running query on neo4j",
-                extra=dict(query=self.query, params=params),
-            )
 
-            query = Query(self.query, params)
+            query = Query(
+                self.query,
+                parameters=params,
+            )
             query_results = await self.database_connection.execute(
                 query,
                 routing_=RoutingControl.READ,
@@ -52,5 +67,5 @@ class Neo4jExtractor(Extractor):
             returned_records = list(query_results)
             should_continue = len(returned_records) > 0
             offset += self.limit
-            for item in returned_records:
-                yield item
+            for record in returned_records:
+                yield Neo4jRecordWrapper(record)

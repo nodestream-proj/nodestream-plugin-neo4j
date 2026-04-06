@@ -1,6 +1,6 @@
 - implementation: nodestream_plugin_neo4j.extractor:Neo4jExtractor
   arguments:
-    database: neo4j
+    database_name: neo4j
     uri: !env NEO4J_CONNECT_URI
     username: neo4j
     password: password

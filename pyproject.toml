@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "nodestream-plugin-neo4j"
-version = "0.14.4"
+version = "0.15.0"
 description = ""
 authors = ["Zach Probst <Zach_Probst@intuit.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-nodestream = "^0.14.14"
+nodestream = "^0.15.0"
 neo4j = "^5.16.0"
 cymple = "^0.11.0"
 dacite = "^1.9.2"
@@ -26,6 +26,7 @@ isort = "^5.13.2"
 h11 = "0.16.0"
 
 [tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/integration", "tests/e2e"]
 markers = [
     "integration: marks the test as an integration test (deselect with '-m \"not integration\"')",
     "e2e: marks the test as an end-to-end test (deselect with '-m \"not e2e\"')",
