@@ -136,7 +136,7 @@ async def test_execute_relationship_type_renamed(migrator):
         f"MATCH (n)-[r:`OLD_TYPE`]->(m) "
         f"CALL {{ WITH n, r, m "
         f"CREATE (n)-[r2:`NEW_TYPE`]->(m) "
-        f"SET r2 += r "
+        f"SET r2 += properties(r) "
         f"DELETE r }} "
         f"IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS",
         is_implicit=True,
