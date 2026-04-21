@@ -1,4 +1,5 @@
-from typing import AsyncGenerator, Tuple, cast
+import math
+from typing import AsyncGenerator, List, Optional, Set, Tuple, cast
 
 from neo4j import RoutingControl
 from neo4j.graph import Node as Neo4jNode
@@ -20,6 +21,23 @@ MATCH (n:{type})
 FETCH_ALL_RELATIONSHIPS_BY_TYPE_BETWEEN_QUERY_FORMAT = """\
 MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
 {where}RETURN a, r, b SKIP $offset LIMIT $limit
+"""
+
+# Keyed variants: ORDER BY a stable key field then SKIP/LIMIT within a
+# pre-computed shard window.  The shard window is [shard_offset, shard_offset +
+# shard_limit) and is applied *after* filtering, so the caller pre-computes
+# shard boundaries from the histogram count.  Using WITH … ORDER BY before SKIP
+# forces Neo4j to sort the filtered set consistently across parallel shards.
+FETCH_NODES_SHARD_QUERY_FORMAT = """\
+MATCH (n:{type})
+{where}WITH n ORDER BY n.`{key_field}` SKIP $shard_offset LIMIT $shard_limit
+RETURN n SKIP $offset LIMIT $limit
+"""
+
+FETCH_RELATIONSHIPS_SHARD_QUERY_FORMAT = """\
+MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
+{where}WITH a, r, b ORDER BY r.`{key_field}` SKIP $shard_offset LIMIT $shard_limit
+RETURN a, r, b SKIP $offset LIMIT $limit
 """
 
 COUNT_NODES_BY_TYPE_QUERY_FORMAT = """\
@@ -114,6 +132,32 @@ class Neo4jTypeRetriever(TypeRetriever):
             limit=self.limit,
         )
 
+    def get_node_type_shard_extractor(
+        self,
+        node_type: str,
+        key_field: str,
+        shard_offset: int,
+        shard_limit: int,
+    ) -> Neo4jExtractor:
+        """Return an extractor scoped to a pre-computed shard window.
+
+        The shard window [shard_offset, shard_offset + shard_limit) is applied
+        over the ORDER BY key_field sorted result set *after* any active
+        filters.  Within that window the extractor still paginates with
+        self.limit-sized pages so individual queries stay small.
+        """
+        where = self._where_clause("n")
+        query = FETCH_NODES_SHARD_QUERY_FORMAT.format(
+            type=node_type, where=where, key_field=key_field
+        )
+        params = dict(self._filter_parameters(), shard_offset=shard_offset, shard_limit=shard_limit)
+        return Neo4jExtractor(
+            query,
+            self.database_connection,
+            parameters=params,
+            limit=self.limit,
+        )
+
     def get_relationships_of_type_bettween_extractor(
         self, from_node_type: str, to_node_type: str, relationship_type: str
     ) -> Neo4jExtractor:
@@ -129,6 +173,47 @@ class Neo4jTypeRetriever(TypeRetriever):
             parameters=self._filter_parameters(),
             limit=self.limit,
         )
+
+    def get_relationships_of_type_between_shard_extractor(
+        self,
+        from_node_type: str,
+        to_node_type: str,
+        relationship_type: str,
+        key_field: str,
+        shard_offset: int,
+        shard_limit: int,
+    ) -> Neo4jExtractor:
+        """Return an extractor scoped to a pre-computed shard window for relationships."""
+        where = self._where_clause("r")
+        query = FETCH_RELATIONSHIPS_SHARD_QUERY_FORMAT.format(
+            from_node_type=from_node_type,
+            relationship_type=relationship_type,
+            to_node_type=to_node_type,
+            where=where,
+            key_field=key_field,
+        )
+        params = dict(self._filter_parameters(), shard_offset=shard_offset, shard_limit=shard_limit)
+        return Neo4jExtractor(
+            query,
+            self.database_connection,
+            parameters=params,
+            limit=self.limit,
+        )
+
+    def compute_shards(self, total_count: int, shard_size: int) -> List[Tuple[int, int]]:
+        """Return (shard_offset, shard_limit) pairs covering [0, total_count).
+
+        Each shard covers at most shard_size records.  The last shard may be
+        smaller.  If total_count is 0 a single zero-width shard is returned so
+        the caller always gets at least one entry to process.
+        """
+        if total_count <= 0 or shard_size <= 0:
+            return [(0, shard_size or 1)]
+        num_shards = math.ceil(total_count / shard_size)
+        return [
+            (i * shard_size, min(shard_size, total_count - i * shard_size))
+            for i in range(num_shards)
+        ]
 
     async def preview_node_count(self, node_type: str) -> int:
         """Return a quick count of nodes of the given type."""
@@ -161,11 +246,54 @@ class Neo4jTypeRetriever(TypeRetriever):
                 record.original["n"], node_type=node_type
             )
 
+    async def get_nodes_of_type_shard(
+        self,
+        node_type: str,
+        key_field: str,
+        shard_offset: int,
+        shard_limit: int,
+    ) -> AsyncGenerator[Node, None]:
+        """Yield nodes from a single pre-computed shard window."""
+        extractor = self.get_node_type_shard_extractor(
+            node_type, key_field, shard_offset, shard_limit
+        )
+        async for record in extractor.extract_records():
+            yield self.map_neo4j_node_to_nodestream_node(
+                record.original["n"], node_type=node_type
+            )
+
     async def get_relationships_of_type_between(
         self, from_node_type: str, to_node_type: str, relationship_type: str
     ) -> AsyncGenerator[RelationshipWithNodes, None]:
         extractor = self.get_relationships_of_type_bettween_extractor(
             from_node_type, to_node_type, relationship_type
+        )
+        async for record in extractor.extract_records():
+            yield RelationshipWithNodes(
+                from_node=self.map_neo4j_node_to_nodestream_node(
+                    record.original["a"], node_type=from_node_type
+                ),
+                to_node=self.map_neo4j_node_to_nodestream_node(
+                    record.original["b"], node_type=to_node_type
+                ),
+                relationship=self.map_neo4j_relationship_to_nodestream_relationship(
+                    record.original["r"], relationship_type=relationship_type
+                ),
+            )
+
+    async def get_relationships_of_type_between_shard(
+        self,
+        from_node_type: str,
+        to_node_type: str,
+        relationship_type: str,
+        key_field: str,
+        shard_offset: int,
+        shard_limit: int,
+    ) -> AsyncGenerator[RelationshipWithNodes, None]:
+        """Yield relationships from a single pre-computed shard window."""
+        extractor = self.get_relationships_of_type_between_shard_extractor(
+            from_node_type, to_node_type, relationship_type,
+            key_field, shard_offset, shard_limit,
         )
         async for record in extractor.extract_records():
             yield RelationshipWithNodes(
