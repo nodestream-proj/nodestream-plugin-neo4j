@@ -1,4 +1,5 @@
 import asyncio
+import socket
 from logging import getLogger
 from typing import Awaitable, Callable, Iterable, Tuple, Union
 
@@ -30,14 +31,42 @@ from .result import Neo4jQueryStatistics, Neo4jResult
 RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
 AUTH_RATE_LIMIT_CODE = "Neo.ClientError.Security.AuthenticationRateLimit"
 
+# EAI errnos that indicate a transient DNS failure from getaddrinfo.
+# In neo4j driver <6.0, these surface as ValueError("Cannot resolve address ...")
+# with __cause__ being a socket.gaierror. Driver >=6.0 raises ServiceUnavailable
+# directly for these, so this check becomes a no-op on 6.x.
+_RETRYABLE_DNS_ERRNOS = frozenset(
+    filter(
+        None,
+        [
+            getattr(socket, "EAI_AGAIN", None),    # temporary DNS failure
+            getattr(socket, "EAI_NONAME", None),    # host not found (our case)
+            getattr(socket, "EAI_NODATA", None),    # no DNS records
+            getattr(socket, "EAI_ADDRFAMILY", None), # address family not supported
+            getattr(socket, "EAI_MEMORY", None),    # out of memory
+            getattr(socket, "EAI_FAIL", None),      # non-recoverable failure
+        ],
+    )
+)
+
 
 def is_retryable(e: Exception) -> bool:
     if isinstance(e, RETRYABLE_EXCEPTIONS):
         return True
     # AuthenticationRateLimit is a ClientError (not AuthError) but is transient.
-    return (
-        isinstance(e, ClientError) and getattr(e, "code", None) == AUTH_RATE_LIMIT_CODE
-    )
+    if isinstance(e, ClientError) and getattr(e, "code", None) == AUTH_RATE_LIMIT_CODE:
+        return True
+    # neo4j driver <6.0 wraps transient DNS failures (socket.gaierror) as
+    # ValueError("Cannot resolve address ...") instead of ServiceUnavailable.
+    # Match only on DNS-specific EAI errnos to avoid catching unrelated ValueErrors
+    # (e.g. bad query parameters) or unrelated OSErrors (e.g. permission denied).
+    if (
+        isinstance(e, ValueError)
+        and isinstance(e.__cause__, OSError)
+        and e.__cause__.errno in _RETRYABLE_DNS_ERRNOS
+    ):
+        return True
+    return False
 
 
 def convert_routing_control_to_access_mode(routing_control: RoutingControl) -> str:
