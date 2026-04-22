@@ -40,6 +40,20 @@ MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
 RETURN a, r, b SKIP $offset LIMIT $limit
 """
 
+# Fallback shard variant for nodes/relationships with no schema key — orders by
+# elementId which is always available and provides a stable, consistent ordering.
+FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT = """\
+MATCH (n:{type})
+{where}WITH n ORDER BY elementId(n) SKIP $shard_offset LIMIT $shard_limit
+RETURN n SKIP $offset LIMIT $limit
+"""
+
+FETCH_RELATIONSHIPS_SHARD_ELEMENTID_QUERY_FORMAT = """\
+MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
+{where}WITH a, r, b ORDER BY elementId(r) SKIP $shard_offset LIMIT $shard_limit
+RETURN a, r, b SKIP $offset LIMIT $limit
+"""
+
 COUNT_NODES_BY_TYPE_QUERY_FORMAT = """\
 MATCH (n:{type})
 {where}RETURN count(n) AS count
@@ -135,22 +149,32 @@ class Neo4jTypeRetriever(TypeRetriever):
     def get_node_type_shard_extractor(
         self,
         node_type: str,
-        key_field: str,
+        key_field: Optional[str],
         shard_offset: int,
         shard_limit: int,
     ) -> Neo4jExtractor:
         """Return an extractor scoped to a pre-computed shard window.
 
         The shard window [shard_offset, shard_offset + shard_limit) is applied
-        over the ORDER BY key_field sorted result set *after* any active
-        filters.  Within that window the extractor still paginates with
-        self.limit-sized pages so individual queries stay small.
+        over the ORDER BY sorted result set *after* any active filters.  Orders
+        by key_field when provided, otherwise falls back to elementId(n) which
+        is always available.  Within that window the extractor still paginates
+        with self.limit-sized pages so individual queries stay small.
         """
         where = self._where_clause("n")
-        query = FETCH_NODES_SHARD_QUERY_FORMAT.format(
-            type=node_type, where=where, key_field=key_field
+        if key_field:
+            query = FETCH_NODES_SHARD_QUERY_FORMAT.format(
+                type=node_type, where=where, key_field=key_field
+            )
+        else:
+            query = FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT.format(
+                type=node_type, where=where
+            )
+        params = dict(
+            self._filter_parameters(),
+            shard_offset=shard_offset,
+            shard_limit=shard_limit,
         )
-        params = dict(self._filter_parameters(), shard_offset=shard_offset, shard_limit=shard_limit)
         return Neo4jExtractor(
             query,
             self.database_connection,
@@ -179,20 +203,35 @@ class Neo4jTypeRetriever(TypeRetriever):
         from_node_type: str,
         to_node_type: str,
         relationship_type: str,
-        key_field: str,
+        key_field: Optional[str],
         shard_offset: int,
         shard_limit: int,
     ) -> Neo4jExtractor:
-        """Return an extractor scoped to a pre-computed shard window for relationships."""
+        """Return an extractor scoped to a pre-computed shard window for relationships.
+
+        Orders by key_field when provided, otherwise falls back to elementId(r).
+        """
         where = self._where_clause("r")
-        query = FETCH_RELATIONSHIPS_SHARD_QUERY_FORMAT.format(
-            from_node_type=from_node_type,
-            relationship_type=relationship_type,
-            to_node_type=to_node_type,
-            where=where,
-            key_field=key_field,
+        if key_field:
+            query = FETCH_RELATIONSHIPS_SHARD_QUERY_FORMAT.format(
+                from_node_type=from_node_type,
+                relationship_type=relationship_type,
+                to_node_type=to_node_type,
+                where=where,
+                key_field=key_field,
+            )
+        else:
+            query = FETCH_RELATIONSHIPS_SHARD_ELEMENTID_QUERY_FORMAT.format(
+                from_node_type=from_node_type,
+                relationship_type=relationship_type,
+                to_node_type=to_node_type,
+                where=where,
+            )
+        params = dict(
+            self._filter_parameters(),
+            shard_offset=shard_offset,
+            shard_limit=shard_limit,
         )
-        params = dict(self._filter_parameters(), shard_offset=shard_offset, shard_limit=shard_limit)
         return Neo4jExtractor(
             query,
             self.database_connection,
@@ -200,7 +239,9 @@ class Neo4jTypeRetriever(TypeRetriever):
             limit=self.limit,
         )
 
-    def compute_shards(self, total_count: int, shard_size: int) -> List[Tuple[int, int]]:
+    def compute_shards(
+        self, total_count: int, shard_size: int
+    ) -> List[Tuple[int, int]]:
         """Return (shard_offset, shard_limit) pairs covering [0, total_count).
 
         Each shard covers at most shard_size records.  The last shard may be
@@ -292,8 +333,12 @@ class Neo4jTypeRetriever(TypeRetriever):
     ) -> AsyncGenerator[RelationshipWithNodes, None]:
         """Yield relationships from a single pre-computed shard window."""
         extractor = self.get_relationships_of_type_between_shard_extractor(
-            from_node_type, to_node_type, relationship_type,
-            key_field, shard_offset, shard_limit,
+            from_node_type,
+            to_node_type,
+            relationship_type,
+            key_field,
+            shard_offset,
+            shard_limit,
         )
         async for record in extractor.extract_records():
             yield RelationshipWithNodes(
