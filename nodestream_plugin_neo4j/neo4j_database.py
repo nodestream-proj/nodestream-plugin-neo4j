@@ -77,6 +77,12 @@ def is_retryable(e: Exception) -> bool:
         and e.__cause__.errno in _RETRYABLE_DNS_ERRNOS
     ):
         return True
+    # In neo4j driver 6.x with uvloop, an exhausted connection_acquisition_timeout
+    # deadline causes uvloop to receive ssl_handshake_timeout=0, raising:
+    # ValueError("ssl_handshake_timeout should be a positive number, got 0")
+    # This has no __cause__ and no typed neo4j exception — match on message.
+    if isinstance(e, ValueError) and "ssl_handshake_timeout" in str(e):
+        return True
     return False
 
 
