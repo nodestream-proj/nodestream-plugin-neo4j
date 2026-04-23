@@ -83,6 +83,12 @@ def is_retryable(e: Exception) -> bool:
     # This has no __cause__ and no typed neo4j exception — match on message.
     if isinstance(e, ValueError) and "ssl_handshake_timeout" in str(e):
         return True
+    # neo4j driver 6.x bug: when a connection is in a broken state during rotation,
+    # fetch_all()/reset() dequeues None instead of a response object, raising:
+    # AttributeError: 'NoneType' object has no attribute 'complete'
+    # This is a transient connection state issue, not a query or data error.
+    if isinstance(e, AttributeError) and "'NoneType' object has no attribute 'complete'" in str(e):
+        return True
     return False
 
 
