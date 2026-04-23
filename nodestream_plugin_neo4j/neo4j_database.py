@@ -23,12 +23,23 @@ from neo4j.exceptions import (
     SessionExpired,
     TransientError,
 )
+
+try:
+    # Introduced in neo4j driver 6.x; replaces ClientError for pool timeout cases.
+    from neo4j.exceptions import ConnectionAcquisitionTimeoutError as _ConnectionAcquisitionTimeoutError
+except ImportError:
+    _ConnectionAcquisitionTimeoutError = None
 from nodestream.file_io import LazyLoadedArgument
 
 from .query import Query
 from .result import Neo4jQueryStatistics, Neo4jResult
 
 RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
+# ConnectionAcquisitionTimeoutError is a DriverError (not Neo4jError) introduced
+# in neo4j driver 6.x. It replaces ClientError for pool timeout cases and is
+# transient — the pool may free up on retry after driver rotation.
+if _ConnectionAcquisitionTimeoutError is not None:
+    RETRYABLE_EXCEPTIONS = (*RETRYABLE_EXCEPTIONS, _ConnectionAcquisitionTimeoutError)
 AUTH_RATE_LIMIT_CODE = "Neo.ClientError.Security.AuthenticationRateLimit"
 
 # EAI errnos that indicate a transient DNS failure from getaddrinfo.
