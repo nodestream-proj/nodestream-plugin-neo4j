@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from hamcrest import assert_that, equal_to
 from neo4j import AsyncDriver, RoutingControl
@@ -115,6 +117,123 @@ async def test_execute_fail_and_then_fail(database_connection, mocker):
     database_connection.driver_factory = driver_factory
     with pytest.raises(TransientError):
         await database_connection.execute(A_QUERY)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_rotation_does_not_close_fresh_driver(mocker):
+    """Two concurrent failing queries must not double-rotate the driver.
+
+    Before the fix, query A and query B would both observe the failing
+    initial driver, both raise, both call ``_rotate_driver``. A's rotation
+    would build a fresh replacement driver; B's rotation would then close
+    that just-built driver, potentially breaking an in-flight query on it
+    and creating yet another rotation. The fix uses a stale_driver guard:
+    when B reaches ``_rotate_driver`` it sees that ``self._driver`` no
+    longer matches the driver B's failing query was using, so B skips the
+    rotation and retries against A's replacement driver.
+
+    This test asserts the post-fix invariant: exactly one rotation occurs,
+    so the factory builds the initial driver plus one replacement (2 total),
+    and only the failing initial driver is closed.
+    """
+    failing_driver = mocker.AsyncMock(AsyncDriver)
+
+    async def fail_then_yield(*args, **kwargs):
+        # Yield once before raising so both concurrent tasks reach the
+        # failing call before either handles the exception. Without this
+        # yield, asyncio may run one task to completion before the other
+        # starts, which would mask the race.
+        await asyncio.sleep(0)
+        raise TransientError("simulated transient")
+
+    failing_driver.execute_query = fail_then_yield
+
+    succeeding_result = mocker.Mock()
+    succeeding_result.records = []
+    succeeding_result.keys = []
+    summary = mocker.Mock()
+    summary.result_available_after = 0
+    summary.result_consumed_after = 0
+    counters = mocker.Mock()
+    for attr in (
+        "nodes_created",
+        "nodes_deleted",
+        "relationships_created",
+        "relationships_deleted",
+        "properties_set",
+        "labels_added",
+        "labels_removed",
+        "constraints_added",
+        "constraints_removed",
+        "indexes_added",
+        "indexes_removed",
+    ):
+        setattr(counters, attr, 0)
+    summary.counters = counters
+    succeeding_result.summary = summary
+
+    succeeding_driver = mocker.AsyncMock(AsyncDriver)
+    succeeding_driver.execute_query.return_value = succeeding_result
+
+    factory_call_count = 0
+
+    def driver_factory():
+        nonlocal factory_call_count
+        factory_call_count += 1
+        return failing_driver if factory_call_count == 1 else succeeding_driver
+
+    db = Neo4jDatabaseConnection(
+        driver_factory=driver_factory,
+        database_name="neo4j",
+        max_retry_attempts=3,
+        retry_factor=0.001,
+    )
+
+    # Two concurrent queries against the same connection.
+    results = await asyncio.gather(
+        db.execute(A_QUERY),
+        db.execute(A_QUERY),
+        return_exceptions=True,
+    )
+
+    # Both queries succeed on retry.
+    for r in results:
+        assert not isinstance(r, BaseException), f"unexpected error: {r!r}"
+
+    # Exactly one rotation: factory called twice (initial + one replacement).
+    assert_that(factory_call_count, equal_to(2))
+    # The failing driver was closed exactly once; the replacement was not closed.
+    assert_that(failing_driver.close.call_count, equal_to(1))
+    assert_that(succeeding_driver.close.call_count, equal_to(0))
+
+
+@pytest.mark.asyncio
+async def test_rotate_driver_skips_when_stale_driver_already_replaced(
+    database_connection, mock_driver, mocker
+):
+    """Direct test for the stale_driver guard in _rotate_driver.
+
+    When the caller's stale_driver no longer matches the connection's
+    current driver, the rotation must be a no-op: no close, no factory
+    call, no sleep.
+    """
+    # Connection currently holds mock_driver (set by the fixture).
+    fresh_driver = database_connection._driver
+
+    # Pretend the caller observed a failure on a different (older) driver.
+    older_driver = mocker.AsyncMock(AsyncDriver)
+
+    # Replace the factory with a tripwire — it must not be called.
+    database_connection.driver_factory = mocker.Mock(
+        side_effect=AssertionError("driver_factory should not be called")
+    )
+
+    await database_connection._rotate_driver(attempts=1, stale_driver=older_driver)
+
+    # No close, no replacement, current driver unchanged.
+    assert_that(fresh_driver.close.call_count, equal_to(0))
+    assert_that(database_connection._driver is fresh_driver, equal_to(True))
+    database_connection.driver_factory.assert_not_called()
 
 
 @pytest.mark.asyncio

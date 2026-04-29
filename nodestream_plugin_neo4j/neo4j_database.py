@@ -111,13 +111,23 @@ class Neo4jDatabaseConnection:
                 self._driver = self.driver_factory()
             return self._driver
 
-    async def _rotate_driver(self, attempts: int) -> None:
+    async def _rotate_driver(
+        self, attempts: int, stale_driver: AsyncDriver | None = None
+    ) -> None:
         """Close the current driver, back off, then create a fresh one.
 
         Holds _driver_lock for the entire duration so concurrent _get_driver()
         callers block until the fresh driver is ready.
+
+        If ``stale_driver`` is provided and no longer matches ``self._driver``,
+        another caller has already rotated since the failure was observed, so
+        this rotation is skipped to avoid closing a freshly-built driver that
+        a concurrent query may be using.
         """
         async with self._driver_lock:
+            if stale_driver is not None and self._driver is not stale_driver:
+                # Already rotated by another caller; nothing to do.
+                return
             if self._driver is not None:
                 await self._driver.close()
                 self._driver = None
@@ -226,6 +236,9 @@ class Neo4jDatabaseConnection:
         attempts = 0
         while True:
             attempts += 1
+            # Capture which driver this attempt used so we can rotate only
+            # if a concurrent caller hasn't already replaced it.
+            attempt_driver = await self._get_driver()
             try:
                 return await self._execute_query(query, log_result, routing_)
             except Exception as e:
@@ -238,7 +251,7 @@ class Neo4jDatabaseConnection:
                 )
                 if attempts >= self.max_retry_attempts:
                     raise
-                await self._rotate_driver(attempts)
+                await self._rotate_driver(attempts, stale_driver=attempt_driver)
 
     async def session(self) -> AsyncSession:
         driver = await self._get_driver()
