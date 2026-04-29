@@ -65,11 +65,17 @@ def _make_driver_result(mocker) -> Mock:
     summary.result_consumed_after = 0
     counters = mocker.Mock()
     for attr in [
-        "nodes_created", "nodes_deleted",
-        "relationships_created", "relationships_deleted",
-        "properties_set", "labels_added", "labels_removed",
-        "constraints_added", "constraints_removed",
-        "indexes_added", "indexes_removed",
+        "nodes_created",
+        "nodes_deleted",
+        "relationships_created",
+        "relationships_deleted",
+        "properties_set",
+        "labels_added",
+        "labels_removed",
+        "constraints_added",
+        "constraints_removed",
+        "indexes_added",
+        "indexes_removed",
     ]:
         setattr(counters, attr, 0)
     summary.counters = counters
@@ -135,24 +141,14 @@ def make_db(
 
 
 def patch_refresh_method(db: Neo4jDatabaseConnection, signal: asyncio.Event):
-    """
-    Wrap whichever refresh method the implementation exposes
-    (refresh_driver or _rotate_driver) to set signal when called.
-    Returns the patched method name for documentation purposes.
-    """
-    if hasattr(db, "refresh_driver"):
-        method_name = "refresh_driver"
-    else:
-        method_name = "_rotate_driver"
-
-    original = getattr(db, method_name)
+    """Wrap refresh_driver to set signal when called."""
+    original = db.refresh_driver
 
     async def signalling(*args, **kwargs):
         signal.set()
         await original(*args, **kwargs)
 
-    setattr(db, method_name, signalling)
-    return method_name
+    db.refresh_driver = signalling
 
 
 # ---------------------------------------------------------------------------
@@ -188,15 +184,15 @@ async def test_scenario_1_q2_gets_good_driver_after_q1_rotates(mocker):
 
     await asyncio.wait_for(run(), timeout=TIMEOUT)
 
-    assert len(factory_calls) == 1, (
-        f"driver_factory should be called exactly once, got {len(factory_calls)}"
-    )
-    assert bad.execute_query.call_count == 1, (
-        f"Bad driver called {bad.execute_query.call_count} times, expected 1"
-    )
-    assert good.execute_query.call_count == 2, (
-        f"Good driver called {good.execute_query.call_count} times, expected 2"
-    )
+    assert (
+        len(factory_calls) == 1
+    ), f"driver_factory should be called exactly once, got {len(factory_calls)}"
+    assert (
+        bad.execute_query.call_count == 1
+    ), f"Bad driver called {bad.execute_query.call_count} times, expected 1"
+    assert (
+        good.execute_query.call_count == 2
+    ), f"Good driver called {good.execute_query.call_count} times, expected 2"
 
 
 # ---------------------------------------------------------------------------
@@ -231,12 +227,12 @@ async def test_scenario_2_only_one_refresh_when_both_queries_error(mocker):
 
     await asyncio.wait_for(run(), timeout=TIMEOUT)
 
-    assert len(factory_calls) == 1, (
-        f"driver_factory should be called exactly once, got {len(factory_calls)}"
-    )
-    assert good.execute_query.call_count == 2, (
-        f"Good driver called {good.execute_query.call_count} times, expected 2"
-    )
+    assert (
+        len(factory_calls) == 1
+    ), f"driver_factory should be called exactly once, got {len(factory_calls)}"
+    assert (
+        good.execute_query.call_count == 2
+    ), f"Good driver called {good.execute_query.call_count} times, expected 2"
 
 
 # ---------------------------------------------------------------------------
@@ -273,9 +269,9 @@ async def test_scenario_3_q3_waits_without_triggering_another_refresh(mocker):
 
     await asyncio.wait_for(run(), timeout=TIMEOUT)
 
-    assert len(factory_calls) == 1, (
-        f"driver_factory should be called exactly once, got {len(factory_calls)}"
-    )
-    assert good.execute_query.call_count == 3, (
-        f"Good driver called {good.execute_query.call_count} times, expected 3"
-    )
+    assert (
+        len(factory_calls) == 1
+    ), f"driver_factory should be called exactly once, got {len(factory_calls)}"
+    assert (
+        good.execute_query.call_count == 3
+    ), f"Good driver called {good.execute_query.call_count} times, expected 3"

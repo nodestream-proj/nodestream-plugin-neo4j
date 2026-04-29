@@ -152,23 +152,16 @@ async def test_concurrent_callers_do_not_reuse_bad_driver(mocker):
 
     db = make_db([bad_driver, good_driver], retry_factor=0)
 
-    # Hook into whichever refresh method this implementation exposes.
-    refresh_method = "refresh_driver" if hasattr(db, "refresh_driver") else "_rotate_driver"
-    original_refresh = getattr(db, refresh_method)
+    original_refresh = db.refresh_driver
 
     async def controlled_refresh(*args, **kwargs):
-        # Mirror what the real implementation does: block _get_driver callers
-        # by clearing _driver_ready (if the implementation uses it), then
-        # signal that a refresh is in progress and wait for the test to proceed.
-        if hasattr(db, "_driver_ready"):
-            db._driver_ready.clear()
+        db._driver_ready.clear()
         a_refreshing.set()
         await a_may_finish.wait()
-        if hasattr(db, "_driver_ready"):
-            db._driver_ready.set()
+        db._driver_ready.set()
         await original_refresh(*args, **kwargs)
 
-    setattr(db, refresh_method, controlled_refresh)
+    db.refresh_driver = controlled_refresh
 
     a_task = asyncio.ensure_future(db.execute(A_QUERY))
     await a_refreshing.wait()
