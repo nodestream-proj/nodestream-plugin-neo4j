@@ -1,4 +1,5 @@
 import asyncio
+import time
 from logging import getLogger
 from typing import Awaitable, Callable, Iterable, Tuple, Union
 
@@ -102,32 +103,55 @@ class Neo4jDatabaseConnection:
         self.retry_factor = retry_factor
         self._driver: AsyncDriver | None = None
         self.query_set: set[str] = set()
-        self._driver_lock = asyncio.Lock()
+        self._driver_ready = asyncio.Event()
+        self._driver_ready.set()
+        self._refresh_lock = asyncio.Lock()
 
     async def _get_driver(self) -> AsyncDriver:
-        """Return the current driver, waiting if a rotation is in progress."""
-        async with self._driver_lock:
-            if self._driver is None:
-                self._driver = self.driver_factory()
-            return self._driver
+        """Wait for any in-progress refresh to complete, then return the driver.
 
-    async def _rotate_driver(self, attempts: int) -> None:
-        """Close the current driver, back off, then create a fresh one.
-
-        Holds _driver_lock for the entire duration so concurrent _get_driver()
-        callers block until the fresh driver is ready.
+        On first call the driver has not been created yet; acquires
+        _refresh_lock to initialise it with no backoff.
         """
-        async with self._driver_lock:
-            if self._driver is not None:
-                await self._driver.close()
-                self._driver = None
-            await asyncio.sleep(self.retry_factor * attempts)
-            self._driver = self.driver_factory()
+        await self._driver_ready.wait()
+        if self._driver is None:
+            async with self._refresh_lock:
+                if self._driver is None:
+                    self._driver = self.driver_factory()
+        return self._driver  # type: ignore[return-value]
+
+    async def refresh_driver(self, attempts: int, stale_driver: AsyncDriver | None = None) -> None:
+        """Replace the current driver with a fresh one.
+
+        _refresh_lock serialises concurrent refresh attempts.  The second
+        caller to acquire the lock checks whether the driver has already been
+        replaced (i.e. _driver is no longer the stale driver that caused the
+        error) and skips the refresh if so — no double-refresh.
+
+        The backoff sleep is synchronous (time.sleep) so that the event loop
+        is fully blocked during the credential fetch, preventing any other
+        coroutine from interleaving during that window.
+        """
+        async with self._refresh_lock:
+            # If another coroutine already refreshed while we were waiting for
+            # the lock, the stale driver is no longer current — nothing to do.
+            if stale_driver is not None and self._driver is not stale_driver:
+                return
+
+            self._driver_ready.clear()
+            try:
+                if self._driver is not None:
+                    await self._driver.close()
+                    self._driver = None
+                time.sleep(self.retry_factor * attempts)
+                self._driver = self.driver_factory()
+            finally:
+                self._driver_ready.set()
 
     async def close(self) -> None:
         """Close the underlying Neo4j driver if it has been created."""
-        async with self._driver_lock:
-            driver, self._driver = self._driver, None
+        await self._driver_ready.wait()
+        driver, self._driver = self._driver, None
         if driver is not None:
             await driver.close()
 
@@ -226,6 +250,7 @@ class Neo4jDatabaseConnection:
         attempts = 0
         while True:
             attempts += 1
+            stale_driver = await self._get_driver()
             try:
                 return await self._execute_query(query, log_result, routing_)
             except Exception as e:
@@ -238,7 +263,7 @@ class Neo4jDatabaseConnection:
                 )
                 if attempts >= self.max_retry_attempts:
                     raise
-                await self._rotate_driver(attempts)
+                await self.refresh_driver(attempts, stale_driver=stale_driver)
 
     async def session(self) -> AsyncSession:
         driver = await self._get_driver()

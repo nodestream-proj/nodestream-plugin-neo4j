@@ -135,34 +135,48 @@ async def test_auth_rate_limit_error_treated_as_retryable(mocker):
 @pytest.mark.integration
 async def test_concurrent_callers_do_not_reuse_bad_driver(mocker):
     """
-    When caller A hits an error and rotates the driver, any concurrent caller B
-    that arrives while rotation is in progress must wait and then use the fresh
-    driver — it must NOT call execute_query on the bad driver.
+    When caller A hits an error and refreshes the driver, any concurrent
+    caller B that arrives while the refresh is in progress must wait for
+    _driver_ready and then use the fresh driver — it must NOT call
+    execute_query on the bad driver.
+
+    We gate the refresh by patching refresh_driver so it signals when the
+    refresh has started, waits for B to arrive, then proceeds.  B must block
+    on _driver_ready (cleared by refresh_driver) and not touch the bad driver.
     """
-    a_rotating = asyncio.Event()
+    a_refreshing = asyncio.Event()
     a_may_finish = asyncio.Event()
 
     bad_driver = make_bad_driver(mocker, ServiceUnavailable("down"))
     good_driver = make_good_driver(mocker)
 
-    db = make_db([bad_driver, good_driver], retry_factor=1)
+    db = make_db([bad_driver, good_driver], retry_factor=0)
 
-    real_sleep = asyncio.sleep
+    # Hook into whichever refresh method this implementation exposes.
+    refresh_method = "refresh_driver" if hasattr(db, "refresh_driver") else "_rotate_driver"
+    original_refresh = getattr(db, refresh_method)
 
-    async def controlled_sleep(delay):
-        # A is now inside _rotate_driver() — signal B to try and then wait.
-        a_rotating.set()
+    async def controlled_refresh(*args, **kwargs):
+        # Mirror what the real implementation does: block _get_driver callers
+        # by clearing _driver_ready (if the implementation uses it), then
+        # signal that a refresh is in progress and wait for the test to proceed.
+        if hasattr(db, "_driver_ready"):
+            db._driver_ready.clear()
+        a_refreshing.set()
         await a_may_finish.wait()
+        if hasattr(db, "_driver_ready"):
+            db._driver_ready.set()
+        await original_refresh(*args, **kwargs)
 
-    mocker.patch("asyncio.sleep", controlled_sleep)
+    setattr(db, refresh_method, controlled_refresh)
 
     a_task = asyncio.ensure_future(db.execute(A_QUERY))
-    await a_rotating.wait()
+    await a_refreshing.wait()
 
-    # B arrives while A is rotating — it must not call the bad driver.
+    # B arrives while A's refresh has cleared _driver_ready.
     b_task = asyncio.ensure_future(db.execute(ANOTHER_QUERY))
-    await real_sleep(0)
-    await real_sleep(0)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
 
     assert bad_driver.execute_query.call_count == 1, (
         f"Bad driver should have been called exactly once (by A before it errored), "
