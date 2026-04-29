@@ -155,10 +155,11 @@ async def test_concurrent_callers_do_not_reuse_bad_driver(mocker):
     original_refresh = db.refresh_driver
 
     async def controlled_refresh(*args, **kwargs):
+        # Clear the flag so B blocks on _get_driver, signal A has started,
+        # then wait for the test to allow completion before doing the real refresh.
         db._driver_ready.clear()
         a_refreshing.set()
         await a_may_finish.wait()
-        db._driver_ready.set()
         await original_refresh(*args, **kwargs)
 
     db.refresh_driver = controlled_refresh

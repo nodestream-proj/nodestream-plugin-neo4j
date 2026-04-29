@@ -105,48 +105,55 @@ class Neo4jDatabaseConnection:
         self.query_set: set[str] = set()
         self._driver_ready = asyncio.Event()
         self._driver_ready.set()
-        self._refresh_lock = asyncio.Lock()
 
     async def _get_driver(self) -> AsyncDriver:
         """Wait for any in-progress refresh to complete, then return the driver.
 
-        On first call the driver has not been created yet; acquires
-        _refresh_lock to initialise it with no backoff.
+        On first call the driver has not been created yet; create it directly.
+        During a refresh _driver_ready is cleared, so callers block here until
+        the refresh completes and the new driver is in place.
         """
         await self._driver_ready.wait()
         if self._driver is None:
-            async with self._refresh_lock:
-                if self._driver is None:
-                    self._driver = self.driver_factory()
+            self._driver = self.driver_factory()
         return self._driver  # type: ignore[return-value]
 
-    async def refresh_driver(self, attempts: int, stale_driver: AsyncDriver | None = None) -> None:
+    async def refresh_driver(
+        self, attempts: int, stale_driver: AsyncDriver | None = None
+    ) -> None:
         """Replace the current driver with a fresh one.
 
-        _refresh_lock serialises concurrent refresh attempts.  The second
-        caller to acquire the lock checks whether the driver has already been
-        replaced (i.e. _driver is no longer the stale driver that caused the
-        error) and skips the refresh if so — no double-refresh.
+        Two guards work together to prevent double-refresh:
 
-        The backoff sleep is synchronous (time.sleep) so that the event loop
-        is fully blocked during the credential fetch, preventing any other
-        coroutine from interleaving during that window.
+        1. stale_driver identity check: if the driver has already been replaced
+           (by a refresh that completed while this coroutine was waiting to be
+           scheduled), skip — nothing to do.
+
+        2. _driver_ready flag (atomic claim): if a refresh is currently in
+           progress (_driver_ready is cleared), skip — the retry will block on
+           _get_driver() until the new driver is ready.  The is_set() check and
+           clear() are both synchronous with no await between them, so this
+           check-and-claim is atomic within the asyncio event loop.
+
+        The backoff sleep is synchronous (time.sleep) so that the event loop is
+        fully blocked during the credential fetch, preventing any other coroutine
+        from interleaving during that window.
         """
-        async with self._refresh_lock:
-            # If another coroutine already refreshed while we were waiting for
-            # the lock, the stale driver is no longer current — nothing to do.
-            if stale_driver is not None and self._driver is not stale_driver:
-                return
-
-            self._driver_ready.clear()
-            try:
-                if self._driver is not None:
-                    await self._driver.close()
-                    self._driver = None
-                time.sleep(self.retry_factor * attempts)
-                self._driver = self.driver_factory()
-            finally:
-                self._driver_ready.set()
+        # Guard 1: driver already replaced by a completed concurrent refresh.
+        if stale_driver is not None and self._driver is not stale_driver:
+            return
+        # Guard 2: a refresh is currently in progress — claim it atomically.
+        if not self._driver_ready.is_set():
+            return
+        self._driver_ready.clear()
+        try:
+            if self._driver is not None:
+                await self._driver.close()
+                self._driver = None
+            time.sleep(self.retry_factor * attempts)
+            self._driver = self.driver_factory()
+        finally:
+            self._driver_ready.set()
 
     async def close(self) -> None:
         """Close the underlying Neo4j driver if it has been created."""
