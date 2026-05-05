@@ -120,7 +120,7 @@ RENAME_REL_TYPE = (
     "MATCH (n)-[r:`{old_type}`]->(m) "
     "CALL {{ WITH n, r, m "
     "CREATE (n)-[r2:`{new_type}`]->(m) "
-    "SET r2 += r "
+    "SET r2 += properties(r) "
     "DELETE r }} "
     "IN TRANSACTIONS OF {batch} ROWS"
 )
@@ -156,6 +156,8 @@ class Neo4jMigrator(OperationTypeRoutingMixin, Migrator):
     async def make_node_constraint(
         self, node_type: str, keys: Iterable[str], constraint_name: str
     ) -> None:
+        if not keys:
+            return
         key_pattern = ",".join(f"n.`{p}`" for p in sorted(keys))
         format = (
             ENTERPRISE_KEY_INDEX_QUERY_FORMAT

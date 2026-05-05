@@ -344,23 +344,26 @@ class CreateRelationshipTypeScenario(Scenario):
 class RenameRelationshipTypeScenario(Scenario):
     def prepare_schema(self, session):
         session.run(
-            "CREATE INDEX RELATIONSHIP_weight_additional_index FOR ()-[r:RELATIONSHIP]-() ON (r.weight)"
+            "CREATE (:TestNode{id: 1})-[:RELATIONSHIP{weight: 0.5, label: 'edge'}]->(:TestNode{id: 2})"
         )
 
     def get_operation(self):
         return RenameRelationshipType("RELATIONSHIP", "NEW_RELATIONSHIP")
 
     def validate_operation(self, session):
-        result = session.run(
-            """
-            SHOW INDEXES
-            YIELD labelsOrTypes, properties
-            WHERE labelsOrTypes = ["NEW_RELATIONSHIP"]
-            RETURN properties
-            """
+        # Old type should be gone
+        old_result = session.run(
+            "MATCH ()-[r:RELATIONSHIP]->() RETURN count(r) as count"
         )
+        assert old_result.single()["count"] == 0
 
-        assert result.single()["properties"] == ["weight"]
+        # New type should exist with all original properties copied
+        new_result = session.run(
+            "MATCH ()-[r:NEW_RELATIONSHIP]->() RETURN r.weight as weight, r.label as label"
+        )
+        record = new_result.single()
+        assert record["weight"] == 0.5
+        assert record["label"] == "edge"
 
 
 class DropRelationshipTypeScenario(Scenario):
