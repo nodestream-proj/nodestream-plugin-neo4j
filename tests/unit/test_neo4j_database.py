@@ -208,13 +208,13 @@ async def test_concurrent_rotation_does_not_close_fresh_driver(mocker):
 
 
 @pytest.mark.asyncio
-async def test_rotate_driver_skips_when_stale_driver_already_replaced(
+async def test_refresh_driver_skips_when_stale_driver_already_replaced(
     database_connection, mock_driver, mocker
 ):
-    """Direct test for the stale_driver guard in _rotate_driver.
+    """Direct test for the stale_driver guard in refresh_driver.
 
     When the caller's stale_driver no longer matches the connection's
-    current driver, the rotation must be a no-op: no close, no factory
+    current driver, the refresh must be a no-op: no close, no factory
     call, no sleep.
     """
     # Connection currently holds mock_driver (set by the fixture).
@@ -228,7 +228,7 @@ async def test_rotate_driver_skips_when_stale_driver_already_replaced(
         side_effect=AssertionError("driver_factory should not be called")
     )
 
-    await database_connection._rotate_driver(attempts=1, stale_driver=older_driver)
+    await database_connection.refresh_driver(attempts=1, stale_driver=older_driver)
 
     # No close, no replacement, current driver unchanged.
     assert_that(fresh_driver.close.call_count, equal_to(0))

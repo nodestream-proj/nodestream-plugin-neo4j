@@ -178,24 +178,28 @@ class Neo4jDatabaseConnection:
         self,
         query: Query,
         log_result: bool = False,
-        routing_=RoutingControl.WRITE,
+        routing_control: RoutingControl = RoutingControl.WRITE,
     ) -> Iterable[Record]:
         driver = await self._get_driver()
         if query.is_implicit:
-            return await self._run_implicit_query(driver, query, log_result, routing_)
-        return await self._run_explicit_query(driver, query, log_result, routing_)
+            return await self._run_implicit_query(
+                driver, query, log_result, routing_control
+            )
+        return await self._run_explicit_query(
+            driver, query, log_result, routing_control
+        )
 
     async def _run_implicit_query(
         self,
         driver: AsyncDriver,
         query: Query,
         log_result: bool = False,
-        routing_=RoutingControl.WRITE,
+        routing_control: RoutingControl = RoutingControl.WRITE,
     ) -> Iterable[Record]:
         # For implicit transactions, Neo4j's session API expects an access mode
         # (`READ_ACCESS` / `WRITE_ACCESS`), not a `RoutingControl` value. Map
         # the routing hint onto the appropriate access mode here.
-        access_mode = convert_routing_control_to_access_mode(routing_)
+        access_mode = convert_routing_control_to_access_mode(routing_control)
 
         async with driver.session(
             database=self.database_name,
@@ -217,14 +221,14 @@ class Neo4jDatabaseConnection:
         driver: AsyncDriver,
         query: Query,
         log_result: bool = False,
-        routing_=RoutingControl.WRITE,
+        routing_control: RoutingControl = RoutingControl.WRITE,
     ) -> Iterable[Record]:
         # TODO we need to use Neo4j's Query classes to avoid string interpolation in the future for injection protection.
         native: EagerResult = await driver.execute_query(
             query.query_statement,
             query.parameters,
             database_=self.database_name,
-            routing_=routing_,
+            routing_=routing_control,
         )  # type: ignore
         result = Neo4jResult(
             query, list(native.records), list(native.keys), native.summary
@@ -251,7 +255,7 @@ class Neo4jDatabaseConnection:
         self,
         query: Query,
         log_result: bool = False,
-        routing_=RoutingControl.WRITE,
+        routing_control: RoutingControl = RoutingControl.WRITE,
     ) -> Iterable[Record]:
         await self.log_query_start(query)
         attempts = 0
@@ -259,14 +263,14 @@ class Neo4jDatabaseConnection:
             attempts += 1
             stale_driver = await self._get_driver()
             try:
-                return await self._execute_query(query, log_result, routing_)
-            except Exception as e:
-                if not is_retryable(e):
+                return await self._execute_query(query, log_result, routing_control)
+            except Exception as exception:
+                if not is_retryable(exception):
                     raise
                 self.logger.warning(
                     "Error executing query, rotating driver and backing off. Attempt %s",
                     attempts,
-                    exc_info=e,
+                    exc_info=exception,
                 )
                 if attempts >= self.max_retry_attempts:
                     raise
