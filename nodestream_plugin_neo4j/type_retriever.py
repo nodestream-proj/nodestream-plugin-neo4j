@@ -307,51 +307,6 @@ class Neo4jTypeRetriever(TypeRetriever):
         first = next(iter(results), None)
         return int(first["count"]) if first is not None else 0
 
-    async def runBoundedIntoQueue(self, coroutines, queue: asyncio.Queue) -> None:
-        """Run coroutines concurrently bounded by self.concurrency_limit, pushing
-        results into *queue*. Sends _QUEUE_DONE when all coroutines finish."""
-        sem = asyncio.Semaphore(self.concurrency_limit)
-
-        async def bounded(coro):
-            async with sem:
-                await coro
-
-        await asyncio.gather(*(bounded(c) for c in coroutines))
-        await queue.put(_QUEUE_DONE)
-
-    async def fetchRelTypeIntoQueue(
-        self,
-        relType: str,
-        adj,
-        schema: Schema,
-        queue: asyncio.Queue,
-        cutoff: datetime | None = None,
-        shardOffset: int | None = None,
-        shardLimit: int | None = None,
-        keyField: str | None = None,
-    ) -> None:
-        """Fetch relationships for a single (relType, adjacency[, shard]) unit.
-
-        Without sharding (shardOffset is None): streams the full type.
-        With sharding: fetches the single pre-computed shard window.
-        Tracks ACTIVE_QUERIES for the duration of the fetch.
-        """
-        Metrics.get().increment(ACTIVE_QUERIES)
-        try:
-            if shardOffset is not None:
-                gen = self.getRelationshipsOfTypeBetweenShard(
-                    adj.from_node_type, adj.to_node_type, relType,
-                    keyField, shardOffset, shardLimit, schema=schema, cutoff=cutoff,
-                )
-            else:
-                gen = self.getRelationshipsOfTypeBetween(
-                    adj.from_node_type, adj.to_node_type, relType, schema=schema, cutoff=cutoff,
-                )
-            async for rwn in gen:
-                await queue.put(rwn)
-        finally:
-            Metrics.get().decrement(ACTIVE_QUERIES)
-
     def computeShards(self, totalCount: int, shardSize: int) -> List[Tuple[int, int]]:
         """Return (shardOffset, shardLimit) pairs covering [0, totalCount)."""
         if totalCount <= 0 or shardSize <= 0:
@@ -369,16 +324,17 @@ class Neo4jTypeRetriever(TypeRetriever):
         count = await self.previewRelationshipCount(relType, cutoff=cutoff)
         return relType, count, cutoff
 
-    async def buildRelCoroutines(
-        self, schema: Schema, queue: asyncio.Queue
-    ) -> list:
-        """Build the flat list of coroutines to run concurrently.
+    async def planRelFetches(self, schema: Schema) -> List[Tuple]:
+        """Return the flat list of fetch specs to run concurrently.
 
-        Without sharding: one coroutine per (relType, adjacency) pair.
-        With sharding: COUNTs are fired concurrently for all rel types, then
-        one coroutine per (relType, adjacency, shard) triple is built from results.
+        Each spec is a (relType, adj, cutoff, shardOffset, shardLimit, keyField) tuple.
+        shardOffset/shardLimit/keyField are None when sharding is disabled.
+
+        Without sharding: one spec per (relType, adjacency) pair.
+        With sharding: COUNTs are fired concurrently for all rel types first, then
+        one spec per (relType, adjacency, shard) triple.
         """
-        # Collect rel types that have adjacencies, snapshot cutoff per type
+        # Collect rel types that have adjacencies, snapshot cutoff per type.
         relTypeAdjacencies = []
         for relType in self.relationship_types:
             adjacencies = list(schema.get_adjacencies_by_relationship_type(relType))
@@ -390,7 +346,7 @@ class Neo4jTypeRetriever(TypeRetriever):
             )
             relTypeAdjacencies.append((relType, adjacencies, cutoff))
 
-        # Fan out COUNTs concurrently when sharding is enabled
+        # Fan out COUNTs concurrently when sharding is enabled.
         if self.shard_size is not None:
             countResults = await asyncio.gather(*(
                 self.countRelType(relType, cutoff)
@@ -400,24 +356,18 @@ class Neo4jTypeRetriever(TypeRetriever):
         else:
             counts = {}
 
-        coroutines = []
+        specs = []
         for relType, adjacencies, cutoff in relTypeAdjacencies:
             if self.shard_size is not None:
                 count, cutoff = counts[relType]
                 keyField = self.keyFieldForRelationshipType(relType, schema)
                 for shardOffset, shardLimit in self.computeShards(count, self.shard_size):
                     for adj in adjacencies:
-                        coroutines.append(self.fetchRelTypeIntoQueue(
-                            relType, adj, schema, queue, cutoff=cutoff,
-                            shardOffset=shardOffset, shardLimit=shardLimit,
-                            keyField=keyField,
-                        ))
+                        specs.append((relType, adj, cutoff, shardOffset, shardLimit, keyField))
             else:
                 for adj in adjacencies:
-                    coroutines.append(self.fetchRelTypeIntoQueue(
-                        relType, adj, schema, queue, cutoff=cutoff,
-                    ))
-        return coroutines
+                    specs.append((relType, adj, cutoff, None, None, None))
+        return specs
 
     async def fetch_nodes(self, schema: Schema) -> AsyncGenerator[Node, None]:
         """Yield all nodes across self.node_types, sharded when shard_size is set."""
@@ -447,15 +397,38 @@ class Neo4jTypeRetriever(TypeRetriever):
         Up to self.concurrency_limit units run in parallel. ACTIVE_QUERIES reflects
         true concurrent Neo4j reads.
         """
-        queue: asyncio.Queue = asyncio.Queue(maxsize=self.orchestrator_queue_size or 0)
-        coroutines = await self.buildRelCoroutines(schema, queue)
-
-        if not coroutines:
+        specs = await self.planRelFetches(schema)
+        if not specs:
             return
 
-        producer = asyncio.create_task(
-            self.runBoundedIntoQueue(coroutines, queue)
-        )
+        queue: asyncio.Queue = asyncio.Queue(maxsize=self.orchestrator_queue_size or 0)
+        sem = asyncio.Semaphore(self.concurrency_limit)
+
+        async def fetchIntoQueue(relType, adj, cutoff, shardOffset, shardLimit, keyField):
+            Metrics.get().increment(ACTIVE_QUERIES)
+            try:
+                if shardOffset is not None:
+                    gen = self.getRelationshipsOfTypeBetweenShard(
+                        adj.from_node_type, adj.to_node_type, relType,
+                        keyField, shardOffset, shardLimit, schema=schema, cutoff=cutoff,
+                    )
+                else:
+                    gen = self.getRelationshipsOfTypeBetween(
+                        adj.from_node_type, adj.to_node_type, relType, schema=schema, cutoff=cutoff,
+                    )
+                async for rwn in gen:
+                    await queue.put(rwn)
+            finally:
+                Metrics.get().decrement(ACTIVE_QUERIES)
+
+        async def runAllBounded():
+            async def bounded(spec):
+                async with sem:
+                    await fetchIntoQueue(*spec)
+            await asyncio.gather(*(bounded(spec) for spec in specs))
+            await queue.put(_QUEUE_DONE)
+
+        producer = asyncio.create_task(runAllBounded())
 
         try:
             while True:
