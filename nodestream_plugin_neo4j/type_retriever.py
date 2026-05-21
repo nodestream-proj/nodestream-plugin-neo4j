@@ -366,7 +366,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         self, relType: str, cutoff: datetime | None
     ) -> tuple[str, int, datetime | None]:
         """Return (relType, count, cutoff) — cutoff snapshotted before the COUNT fires."""
-        count = await self.previewRelationshipCount(relType, cutoff=cutoff) if self.shard_size is not None else 0
+        count = await self.previewRelationshipCount(relType, cutoff=cutoff)
         return relType, count, cutoff
 
     async def buildRelCoroutines(
@@ -432,7 +432,7 @@ class Neo4jTypeRetriever(TypeRetriever):
                 count = await self.previewNodeCount(nodeType, cutoff=cutoff)
                 keyField = self.keyFieldForNodeType(nodeType, schema)
                 for shardOffset, shardLimit in self.computeShards(count, self.shard_size):
-                    async for node in self.getNodesOfTypeShard(nodeType, keyField, shardOffset, shardLimit, cutoff=cutoff):
+                    async for node in self.getNodesOfTypeShard(nodeType, keyField, shardOffset, shardLimit, schema=schema, cutoff=cutoff):
                         yield node
             else:
                 async for node in self.getNodesOfType(nodeType, schema=schema, cutoff=cutoff):
@@ -490,6 +490,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         keyField: str,
         shardOffset: int,
         shardLimit: int,
+        schema: Schema | None = None,
         cutoff: datetime | None = None,
     ) -> AsyncGenerator[Node, None]:
         """Yield nodes from a single pre-computed shard window."""
@@ -498,7 +499,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         )
         async for record in extractor.extract_records():
             yield self.map_neo4j_node_to_nodestream_node(
-                record.original["n"], node_type=nodeType
+                record.original["n"], node_type=nodeType, schema=schema
             )
 
     async def getRelationshipsOfTypeBetween(
