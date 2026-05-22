@@ -1,5 +1,4 @@
 from typing import cast as type_cast
-from unittest.mock import patch
 
 import pytest
 from hamcrest import assert_that, equal_to, has_length
@@ -97,7 +96,7 @@ def test_map_neo4j_relationship_to_nodestream_relationship(subject):
 
 
 def test_get_node_type_extractor(subject):
-    extractor = subject.getNodeTypeExtractor("Person")
+    extractor = subject.get_node_type_extractor("Person")
     assert_that(
         extractor.query,
         equal_to("MATCH (n:Person)\nRETURN n SKIP $offset LIMIT $limit\n"),
@@ -105,7 +104,7 @@ def test_get_node_type_extractor(subject):
 
 
 def test_get_relationships_of_type_between_extractor(subject):
-    extractor = subject.getRelationshipsOfTypeBetweenExtractor(
+    extractor = subject.get_relationships_of_type_between_extractor(
         "Person", "Company", "KNOWS"
     )
     assert_that(
@@ -120,27 +119,27 @@ def test_get_relationships_of_type_between_extractor(subject):
 
 
 def test_where_clause_empty_when_no_filters(subject):
-    assert_that(subject.whereClause("n"), equal_to(""))
+    assert_that(subject.build_where_clause("n"), equal_to(""))
 
 
 def test_where_clause_with_sample_ratio(sampled_subject):
     # Sampling is only applied to relationship variables (sample=True).
     assert_that(
-        sampled_subject.whereClause("r", sample=True),
+        sampled_subject.build_where_clause("r", sample=True),
         equal_to("WHERE toInteger(split(elementId(r), ':')[-1]) % 3 = 0\n"),
     )
 
 
 def test_where_clause_sample_not_applied_to_nodes(sampled_subject):
-    # Nodes are never sampled — whereClause without sample=True produces no clause.
-    assert_that(sampled_subject.whereClause("n"), equal_to(""))
+    # Nodes are never sampled — build_where_clause without sample=True produces no clause.
+    assert_that(sampled_subject.build_where_clause("n"), equal_to(""))
 
 
 def test_where_clause_with_latest_hours(mocker):
     connection = mocker.Mock(Neo4jDatabaseConnection)
     retriever = Neo4jTypeRetriever(connection, latest_hours=12)
     assert_that(
-        retriever.whereClause("r"),
+        retriever.build_where_clause("r"),
         equal_to(
             "WHERE r.`last_ingested_at` >= $cutoff\n"
         ),
@@ -150,7 +149,7 @@ def test_where_clause_with_latest_hours(mocker):
 def test_where_clause_with_both_filters(filtered_subject):
     # When sample=True and latest_hours are both set, both clauses appear.
     assert_that(
-        filtered_subject.whereClause("r", sample=True),
+        filtered_subject.build_where_clause("r", sample=True),
         equal_to(
             "WHERE toInteger(split(elementId(r), ':')[-1]) % 5 = 0"
             " AND r.`last_ingested_at` >= $cutoff\n"
@@ -159,11 +158,11 @@ def test_where_clause_with_both_filters(filtered_subject):
 
 
 def test_filter_parameters_empty_when_no_filters(subject):
-    assert_that(subject.filterParameters(), equal_to({}))
+    assert_that(subject.build_filter_parameters(), equal_to({}))
 
 
 def test_filter_parameters_with_latest_hours(filtered_subject):
-    params = filtered_subject.filterParameters()
+    params = filtered_subject.build_filter_parameters()
     assert set(params.keys()) == {"cutoff"}
 
 
@@ -172,21 +171,21 @@ def test_sample_ratio_of_one_is_ignored(mocker):
     connection = mocker.Mock(Neo4jDatabaseConnection)
     retriever = Neo4jTypeRetriever(connection, sample_ratio=1)
     assert retriever.sample_ratio is None
-    assert_that(retriever.whereClause("n"), equal_to(""))
+    assert_that(retriever.build_where_clause("n"), equal_to(""))
 
 
 # -- Extractor construction (with filters) ----------------------------------
 
 
 def test_get_node_type_extractor_with_filters(filtered_subject):
-    extractor = filtered_subject.getNodeTypeExtractor("Person")
+    extractor = filtered_subject.get_node_type_extractor("Person")
     assert "WHERE" in extractor.query
     assert_that(extractor.limit, equal_to(500))
     assert "cutoff" in extractor.parameters
 
 
 def test_get_relationships_extractor_with_filters(filtered_subject):
-    extractor = filtered_subject.getRelationshipsOfTypeBetweenExtractor(
+    extractor = filtered_subject.get_relationships_of_type_between_extractor(
         "Person", "Company", "KNOWS"
     )
     assert "WHERE" in extractor.query
@@ -200,7 +199,7 @@ def test_get_relationships_extractor_with_filters(filtered_subject):
 @pytest.mark.asyncio
 async def test_preview_node_count(subject):
     subject.database_connection.execute.return_value = [{"count": 42}]
-    count = await subject.previewNodeCount("Person")
+    count = await subject.preview_node_count("Person")
     assert_that(count, equal_to(42))
     call_kwargs = subject.database_connection.execute.call_args
     assert_that(call_kwargs.kwargs.get("routing_"), equal_to(RoutingControl.READ))
@@ -209,13 +208,13 @@ async def test_preview_node_count(subject):
 @pytest.mark.asyncio
 async def test_preview_node_count_empty_result(subject):
     subject.database_connection.execute.return_value = []
-    assert_that(await subject.previewNodeCount("Ghost"), equal_to(0))
+    assert_that(await subject.preview_node_count("Ghost"), equal_to(0))
 
 
 @pytest.mark.asyncio
 async def test_preview_relationship_count(subject):
     subject.database_connection.execute.return_value = [{"count": 99}]
-    count = await subject.previewRelationshipCount("KNOWS")
+    count = await subject.preview_relationship_count("KNOWS")
     assert_that(count, equal_to(99))
     call_kwargs = subject.database_connection.execute.call_args
     assert_that(call_kwargs.kwargs.get("routing_"), equal_to(RoutingControl.READ))
@@ -224,35 +223,35 @@ async def test_preview_relationship_count(subject):
 @pytest.mark.asyncio
 async def test_preview_relationship_count_empty_result(subject):
     subject.database_connection.execute.return_value = []
-    assert_that(await subject.previewRelationshipCount("GHOST_REL"), equal_to(0))
+    assert_that(await subject.preview_relationship_count("GHOST_REL"), equal_to(0))
 
 
 @pytest.mark.asyncio
 async def test_preview_node_count_with_filters(filtered_subject):
     """Count query should include the WHERE clause when filters are active."""
     filtered_subject.database_connection.execute.return_value = [{"count": 10}]
-    count = await filtered_subject.previewNodeCount("Person")
+    count = await filtered_subject.preview_node_count("Person")
     assert_that(count, equal_to(10))
     query_arg = filtered_subject.database_connection.execute.call_args.args[0]
     assert "WHERE" in query_arg.query_statement
     assert "cutoff" in query_arg.parameters
 
 
-# -- getNodesOfType / getRelationshipsOfTypeBetween ------------------
+# -- get_nodes_of_type / get_relationships_of_type_between ------------------
 
 
 @pytest.mark.asyncio
 async def test_get_nodes_of_type(subject, mocker):
     subject.map_neo4j_node_to_nodestream_node = mocker.Mock()
-    subject.getNodeTypeExtractor = mocker.Mock()
-    extractor = subject.getNodeTypeExtractor.return_value
+    subject.get_node_type_extractor = mocker.Mock()
+    extractor = subject.get_node_type_extractor.return_value
     n1 = FakeNeo4jNode(("Person",), {"id": 1, "name": "p1"})
     n2 = FakeNeo4jNode(("Person", "Employee"), {"id": 2, "name": "p2"})
     extractor.extract_records.return_value = async_generator(
         Neo4jRecordWrapper(type_cast(Record, FakeRecord({"n": n1}))),
         Neo4jRecordWrapper(type_cast(Record, FakeRecord({"n": n2}))),
     )
-    results = [r async for r in subject.getNodesOfType("Person")]
+    results = [r async for r in subject.get_nodes_of_type("Person")]
     assert_that(results, has_length(2))
     subject.map_neo4j_node_to_nodestream_node.assert_any_call(n1, node_type="Person", schema=None)
     subject.map_neo4j_node_to_nodestream_node.assert_any_call(n2, node_type="Person", schema=None)
@@ -262,8 +261,8 @@ async def test_get_nodes_of_type(subject, mocker):
 async def test_get_relationships_of_type_between(subject, mocker):
     subject.map_neo4j_node_to_nodestream_node = mocker.Mock()
     subject.map_neo4j_relationship_to_nodestream_relationship = mocker.Mock()
-    subject.getRelationshipsOfTypeBetweenExtractor = mocker.Mock()
-    extractor = subject.getRelationshipsOfTypeBetweenExtractor.return_value
+    subject.get_relationships_of_type_between_extractor = mocker.Mock()
+    extractor = subject.get_relationships_of_type_between_extractor.return_value
     a1 = FakeNeo4jNode(("Person",), {"id": 1})
     b1 = FakeNeo4jNode(("Company",), {"id": 10})
     r1 = FakeNeo4jRel("KNOWS", {"since": 2019})
@@ -276,7 +275,7 @@ async def test_get_relationships_of_type_between(subject, mocker):
     )
     results = [
         r
-        async for r in subject.getRelationshipsOfTypeBetween(
+        async for r in subject.get_relationships_of_type_between(
             "Person", "Company", "KNOWS"
         )
     ]
