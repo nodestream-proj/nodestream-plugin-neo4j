@@ -140,7 +140,7 @@ async def test_dns_resolution_failure_treated_as_retryable(mocker):
     denied) are NOT retried — only EAI errnos from getaddrinfo are matched.
     """
     dns_error = socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided")
-    dns_value_error = ValueError(f"Cannot resolve address neo4j.example.com:7687")
+    dns_value_error = ValueError("Cannot resolve address neo4j.example.com:7687")
     dns_value_error.__cause__ = dns_error
 
     bad_driver = make_bad_driver(mocker, dns_value_error)

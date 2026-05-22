@@ -1,7 +1,7 @@
 import asyncio
 import math
 from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator, List, Optional, Set, Tuple, cast
+from typing import AsyncGenerator, List, Optional, Tuple
 
 from neo4j import RoutingControl
 from neo4j.graph import Node as Neo4jNode
@@ -70,6 +70,7 @@ COUNT_RELATIONSHIPS_BY_TYPE_QUERY_FORMAT = """\
 MATCH ()-[r:{relationship_type}]->()
 {where}RETURN count(r) AS count
 """
+
 
 # Sentinel object for internal producer/consumer queues inside fetch_relationships.
 class _QueueDone:
@@ -161,15 +162,15 @@ class Neo4jTypeRetriever(TypeRetriever):
             )
 
         if self.latest_hours is not None:
-            clauses.append(
-                f"{var}.`{LAST_INGESTED_AT_PROPERTY}` >= $cutoff"
-            )
+            clauses.append(f"{var}.`{LAST_INGESTED_AT_PROPERTY}` >= $cutoff")
 
         if not clauses:
             return ""
         return "WHERE " + " AND ".join(clauses) + "\n"
 
-    def build_filter_parameters(self, cutoff: datetime | None = None) -> dict[str, object]:
+    def build_filter_parameters(
+        self, cutoff: datetime | None = None
+    ) -> dict[str, object]:
         """Parameters required by any active filters."""
         if self.latest_hours is None:
             return {}
@@ -177,7 +178,9 @@ class Neo4jTypeRetriever(TypeRetriever):
             cutoff = datetime.now(timezone.utc) - timedelta(hours=self.latest_hours)
         return {"cutoff": cutoff}
 
-    def get_node_type_extractor(self, node_type: str, cutoff: datetime | None = None) -> Neo4jExtractor:
+    def get_node_type_extractor(
+        self, node_type: str, cutoff: datetime | None = None
+    ) -> Neo4jExtractor:
         where = self.build_where_clause("n")
         return Neo4jExtractor(
             FETCH_ALL_NODES_BY_TYPE_QUERY_FORMAT.format(type=node_type, where=where),
@@ -224,7 +227,10 @@ class Neo4jTypeRetriever(TypeRetriever):
         )
 
     def get_relationships_of_type_between_extractor(
-        self, from_node_type: str, to_node_type: str, relationship_type: str,
+        self,
+        from_node_type: str,
+        to_node_type: str,
+        relationship_type: str,
         cutoff: datetime | None = None,
     ) -> Neo4jExtractor:
         where = self.build_where_clause("r", sample=True)
@@ -282,7 +288,9 @@ class Neo4jTypeRetriever(TypeRetriever):
             limit=self.limit,
         )
 
-    async def preview_node_count(self, node_type: str, cutoff: datetime | None = None) -> int:
+    async def preview_node_count(
+        self, node_type: str, cutoff: datetime | None = None
+    ) -> int:
         """Return a quick count of nodes of the given type."""
         where = self.build_where_clause("n")
         statement = COUNT_NODES_BY_TYPE_QUERY_FORMAT.format(type=node_type, where=where)
@@ -293,7 +301,9 @@ class Neo4jTypeRetriever(TypeRetriever):
         first = next(iter(results), None)
         return int(first["count"]) if first is not None else 0
 
-    async def preview_relationship_count(self, relationship_type: str, cutoff: datetime | None = None) -> int:
+    async def preview_relationship_count(
+        self, relationship_type: str, cutoff: datetime | None = None
+    ) -> int:
         """Return a quick count of relationships of the given type."""
         where = self.build_where_clause("r", sample=True)
         statement = COUNT_RELATIONSHIPS_BY_TYPE_QUERY_FORMAT.format(
@@ -306,7 +316,9 @@ class Neo4jTypeRetriever(TypeRetriever):
         first = next(iter(results), None)
         return int(first["count"]) if first is not None else 0
 
-    def compute_shards(self, total_count: int, shard_size: int) -> List[Tuple[int, int]]:
+    def compute_shards(
+        self, total_count: int, shard_size: int
+    ) -> List[Tuple[int, int]]:
         """Return (shard_offset, shard_limit) pairs covering [0, total_count)."""
         if total_count <= 0 or shard_size <= 0:
             return []
@@ -341,17 +353,22 @@ class Neo4jTypeRetriever(TypeRetriever):
                 continue
             cutoff = (
                 datetime.now(timezone.utc) - timedelta(hours=self.latest_hours)
-                if self.latest_hours is not None else None
+                if self.latest_hours is not None
+                else None
             )
             rel_type_adjacencies.append((rel_type, adjacencies, cutoff))
 
         # Fan out COUNTs concurrently when sharding is enabled.
         if self.shard_size is not None:
-            count_results = await asyncio.gather(*(
-                self.count_relationship_type(rel_type, cutoff)
-                for rel_type, _, cutoff in rel_type_adjacencies
-            ))
-            counts = {rel_type: (count, cutoff) for rel_type, count, cutoff in count_results}
+            count_results = await asyncio.gather(
+                *(
+                    self.count_relationship_type(rel_type, cutoff)
+                    for rel_type, _, cutoff in rel_type_adjacencies
+                )
+            )
+            counts = {
+                rel_type: (count, cutoff) for rel_type, count, cutoff in count_results
+            }
         else:
             counts = {}
 
@@ -360,9 +377,20 @@ class Neo4jTypeRetriever(TypeRetriever):
             if self.shard_size is not None:
                 count, cutoff = counts[rel_type]
                 key_field = self.key_field_for_relationship_type(rel_type, schema)
-                for shard_offset, shard_limit in self.compute_shards(count, self.shard_size):
+                for shard_offset, shard_limit in self.compute_shards(
+                    count, self.shard_size
+                ):
                     for adj in adjacencies:
-                        specs.append((rel_type, adj, cutoff, shard_offset, shard_limit, key_field))
+                        specs.append(
+                            (
+                                rel_type,
+                                adj,
+                                cutoff,
+                                shard_offset,
+                                shard_limit,
+                                key_field,
+                            )
+                        )
             else:
                 for adj in adjacencies:
                     specs.append((rel_type, adj, cutoff, None, None, None))
@@ -375,19 +403,33 @@ class Neo4jTypeRetriever(TypeRetriever):
         for node_type in self.node_types:
             cutoff = (
                 datetime.now(timezone.utc) - timedelta(hours=self.latest_hours)
-                if self.latest_hours is not None else None
+                if self.latest_hours is not None
+                else None
             )
             if self.shard_size is not None:
                 count = await self.preview_node_count(node_type, cutoff=cutoff)
                 key_field = self.key_field_for_node_type(node_type, schema)
-                for shard_offset, shard_limit in self.compute_shards(count, self.shard_size):
-                    async for node in self.get_nodes_of_type_shard(node_type, key_field, shard_offset, shard_limit, schema=schema, cutoff=cutoff):
+                for shard_offset, shard_limit in self.compute_shards(
+                    count, self.shard_size
+                ):
+                    async for node in self.get_nodes_of_type_shard(
+                        node_type,
+                        key_field,
+                        shard_offset,
+                        shard_limit,
+                        schema=schema,
+                        cutoff=cutoff,
+                    ):
                         yield node
             else:
-                async for node in self.get_nodes_of_type(node_type, schema=schema, cutoff=cutoff):
+                async for node in self.get_nodes_of_type(
+                    node_type, schema=schema, cutoff=cutoff
+                ):
                     yield node
 
-    async def fetch_relationships(self, schema: Schema) -> AsyncGenerator[RelationshipWithNodes, None]:
+    async def fetch_relationships(
+        self, schema: Schema
+    ) -> AsyncGenerator[RelationshipWithNodes, None]:
         """Yield all relationships concurrently across all (rel_type, adjacency[, shard]) units.
 
         Without sharding: one coroutine per (rel_type, adjacency) pair.
@@ -403,17 +445,29 @@ class Neo4jTypeRetriever(TypeRetriever):
         queue: asyncio.Queue = asyncio.Queue(maxsize=self.orchestrator_queue_size or 0)
         sem = asyncio.Semaphore(self.concurrency_limit)
 
-        async def fetch_into_queue(rel_type, adj, cutoff, shard_offset, shard_limit, key_field):
+        async def fetch_into_queue(
+            rel_type, adj, cutoff, shard_offset, shard_limit, key_field
+        ):
             Metrics.get().increment(ACTIVE_QUERIES)
             try:
                 if shard_offset is not None:
                     gen = self.get_relationships_of_type_between_shard(
-                        adj.from_node_type, adj.to_node_type, rel_type,
-                        key_field, shard_offset, shard_limit, schema=schema, cutoff=cutoff,
+                        adj.from_node_type,
+                        adj.to_node_type,
+                        rel_type,
+                        key_field,
+                        shard_offset,
+                        shard_limit,
+                        schema=schema,
+                        cutoff=cutoff,
                     )
                 else:
                     gen = self.get_relationships_of_type_between(
-                        adj.from_node_type, adj.to_node_type, rel_type, schema=schema, cutoff=cutoff,
+                        adj.from_node_type,
+                        adj.to_node_type,
+                        rel_type,
+                        schema=schema,
+                        cutoff=cutoff,
                     )
                 async for rwn in gen:
                     await queue.put(rwn)
@@ -424,6 +478,7 @@ class Neo4jTypeRetriever(TypeRetriever):
             async def run_bounded(spec):
                 async with sem:
                     await fetch_into_queue(*spec)
+
             await asyncio.gather(*(run_bounded(spec) for spec in specs))
             await queue.put(_QUEUE_DONE)
 
@@ -446,10 +501,17 @@ class Neo4jTypeRetriever(TypeRetriever):
             return next(iter(node_schema.keys))
         return None
 
-    def key_field_for_relationship_type(self, relationship_type: str, schema: Schema) -> Optional[str]:
+    def key_field_for_relationship_type(
+        self, relationship_type: str, schema: Schema
+    ) -> Optional[str]:
         return LAST_INGESTED_AT_PROPERTY if self.latest_hours is not None else None
 
-    async def get_nodes_of_type(self, node_type: str, schema: Schema | None = None, cutoff: datetime | None = None) -> AsyncGenerator[Node, None]:
+    async def get_nodes_of_type(
+        self,
+        node_type: str,
+        schema: Schema | None = None,
+        cutoff: datetime | None = None,
+    ) -> AsyncGenerator[Node, None]:
         extractor = self.get_node_type_extractor(node_type, cutoff=cutoff)
         async for record in extractor.extract_records():
             yield self.map_neo4j_node_to_nodestream_node(
@@ -475,8 +537,12 @@ class Neo4jTypeRetriever(TypeRetriever):
             )
 
     async def get_relationships_of_type_between(
-        self, from_node_type: str, to_node_type: str, relationship_type: str,
-        schema: Schema | None = None, cutoff: datetime | None = None,
+        self,
+        from_node_type: str,
+        to_node_type: str,
+        relationship_type: str,
+        schema: Schema | None = None,
+        cutoff: datetime | None = None,
     ) -> AsyncGenerator[RelationshipWithNodes, None]:
         extractor = self.get_relationships_of_type_between_extractor(
             from_node_type, to_node_type, relationship_type, cutoff=cutoff

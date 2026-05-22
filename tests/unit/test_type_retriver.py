@@ -140,9 +140,7 @@ def test_where_clause_with_latest_hours(mocker):
     retriever = Neo4jTypeRetriever(connection, latest_hours=12)
     assert_that(
         retriever.build_where_clause("r"),
-        equal_to(
-            "WHERE r.`last_ingested_at` >= $cutoff\n"
-        ),
+        equal_to("WHERE r.`last_ingested_at` >= $cutoff\n"),
     )
 
 
@@ -253,8 +251,12 @@ async def test_get_nodes_of_type(subject, mocker):
     )
     results = [r async for r in subject.get_nodes_of_type("Person")]
     assert_that(results, has_length(2))
-    subject.map_neo4j_node_to_nodestream_node.assert_any_call(n1, node_type="Person", schema=None)
-    subject.map_neo4j_node_to_nodestream_node.assert_any_call(n2, node_type="Person", schema=None)
+    subject.map_neo4j_node_to_nodestream_node.assert_any_call(
+        n1, node_type="Person", schema=None
+    )
+    subject.map_neo4j_node_to_nodestream_node.assert_any_call(
+        n2, node_type="Person", schema=None
+    )
 
 
 @pytest.mark.asyncio
@@ -280,8 +282,12 @@ async def test_get_relationships_of_type_between(subject, mocker):
         )
     ]
     assert_that(results, has_length(2))
-    subject.map_neo4j_node_to_nodestream_node.assert_any_call(a1, node_type="Person", schema=None)
-    subject.map_neo4j_node_to_nodestream_node.assert_any_call(b1, node_type="Company", schema=None)
+    subject.map_neo4j_node_to_nodestream_node.assert_any_call(
+        a1, node_type="Person", schema=None
+    )
+    subject.map_neo4j_node_to_nodestream_node.assert_any_call(
+        b1, node_type="Company", schema=None
+    )
     subject.map_neo4j_relationship_to_nodestream_relationship.assert_any_call(
         r1, relationship_type="KNOWS"
     )
