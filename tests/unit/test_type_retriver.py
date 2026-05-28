@@ -544,14 +544,14 @@ def test_key_field_for_relationship_type_no_latest_hours(basic_schema):
     )
 
 
-# -- plan_relationship_fetches -----------------------------------------------
+# -- _plan_specs (relationship fetch strategies) ------------------------------
 
 
 @pytest.mark.asyncio
-async def test_plan_relationship_fetches_no_sharding(mocker, basic_schema):
+async def test_simple_rel_fetch_plan_specs_no_sharding(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, relationship_types=["BEST_FRIEND_OF"])
-    specs = await retriever.plan_relationship_fetches(basic_schema)
+    specs = await retriever.rel_fetch_strategy._plan_specs(basic_schema)
     # BEST_FRIEND_OF has one adjacency (Person->Person), no sharding => one spec
     assert len(specs) == 1
     rel_type, adj, cutoff, shard_offset, shard_limit, key_field = specs[0]
@@ -564,14 +564,13 @@ async def test_plan_relationship_fetches_no_sharding(mocker, basic_schema):
 
 
 @pytest.mark.asyncio
-async def test_plan_relationship_fetches_with_sharding(mocker, basic_schema):
+async def test_sharded_rel_fetch_plan_specs(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(
         conn, relationship_types=["BEST_FRIEND_OF"], shard_size=1000
     )
-    # count_relationship_type needs the async execute mock
     retriever.preview_relationship_count = mocker.AsyncMock(return_value=2500)
-    specs = await retriever.plan_relationship_fetches(basic_schema)
+    specs = await retriever.rel_fetch_strategy._plan_specs(basic_schema)
     # 2500 / 1000 = 3 shards, 1 adjacency => 3 specs
     assert len(specs) == 3
     offsets = [s[3] for s in specs]
@@ -581,12 +580,12 @@ async def test_plan_relationship_fetches_with_sharding(mocker, basic_schema):
 
 
 @pytest.mark.asyncio
-async def test_plan_relationship_fetches_skips_type_with_no_adjacencies(
+async def test_simple_rel_fetch_plan_specs_skips_type_with_no_adjacencies(
     mocker, basic_schema
 ):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, relationship_types=["UNKNOWN_REL"])
-    specs = await retriever.plan_relationship_fetches(basic_schema)
+    specs = await retriever.rel_fetch_strategy._plan_specs(basic_schema)
     assert specs == []
 
 
