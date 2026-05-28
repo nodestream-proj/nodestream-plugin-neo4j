@@ -350,7 +350,9 @@ async def test_node_key_part_renamed_skips_when_old_key_not_in_constraint(
     )
     migrator.drop_constraint_by_name = mocker.AsyncMock()
     operation = NodeKeyPartRenamed(
-        new_key_part_name="new_key", node_type="NodeType", old_key_part_name="missing_key"
+        new_key_part_name="new_key",
+        node_type="NodeType",
+        old_key_part_name="missing_key",
     )
     await migrator.execute_operation(operation)
     # Should return early — no constraint drop, no rename
@@ -453,6 +455,8 @@ async def test_execute_rename_relationship_type_with_indexes(migrator, mocker):
     operation = RenameRelationshipType(old_type="OLD_REL", new_type="NEW_REL")
     await migrator.execute_rename_relationship_type(operation)
     migrator.execute_add_additional_relationship_property_index.assert_called_once()
-    add_call_arg = migrator.execute_add_additional_relationship_property_index.call_args[0][0]
+    add_call_arg = (
+        migrator.execute_add_additional_relationship_property_index.call_args[0][0]
+    )
     assert isinstance(add_call_arg, AddAdditionalRelationshipPropertyIndex)
     assert add_call_arg.relationship_type == "NEW_REL"

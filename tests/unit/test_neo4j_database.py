@@ -308,7 +308,9 @@ async def test_execute_raises_after_max_retries(database_connection, mocker):
 
 
 @pytest.mark.asyncio
-async def test_execute_raises_immediately_for_non_retryable(database_connection, mocker):
+async def test_execute_raises_immediately_for_non_retryable(
+    database_connection, mocker
+):
     """A non-retryable exception (e.g. plain RuntimeError) is re-raised immediately."""
     database_connection._execute_query = mocker.AsyncMock(
         side_effect=RuntimeError("bad query")

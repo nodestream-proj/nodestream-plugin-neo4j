@@ -485,7 +485,10 @@ def test_key_field_for_node_type_with_latest_hours(basic_schema):
 
     conn = mock.Mock()
     retriever = Neo4jTypeRetriever(conn, latest_hours=24)
-    assert retriever.key_field_for_node_type("Person", basic_schema) == LAST_INGESTED_AT_PROPERTY
+    assert (
+        retriever.key_field_for_node_type("Person", basic_schema)
+        == LAST_INGESTED_AT_PROPERTY
+    )
 
 
 def test_key_field_for_node_type_from_schema_keys(basic_schema):
@@ -535,7 +538,10 @@ def test_key_field_for_relationship_type_no_latest_hours(basic_schema):
 
     conn = mock.Mock()
     retriever = Neo4jTypeRetriever(conn)
-    assert retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema) is None
+    assert (
+        retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema)
+        is None
+    )
 
 
 # -- plan_relationship_fetches -----------------------------------------------
@@ -544,9 +550,7 @@ def test_key_field_for_relationship_type_no_latest_hours(basic_schema):
 @pytest.mark.asyncio
 async def test_plan_relationship_fetches_no_sharding(mocker, basic_schema):
     conn = mocker.Mock()
-    retriever = Neo4jTypeRetriever(
-        conn, relationship_types=["BEST_FRIEND_OF"]
-    )
+    retriever = Neo4jTypeRetriever(conn, relationship_types=["BEST_FRIEND_OF"])
     specs = await retriever.plan_relationship_fetches(basic_schema)
     # BEST_FRIEND_OF has one adjacency (Person->Person), no sharding => one spec
     assert len(specs) == 1
@@ -581,9 +585,7 @@ async def test_plan_relationship_fetches_skips_type_with_no_adjacencies(
     mocker, basic_schema
 ):
     conn = mocker.Mock()
-    retriever = Neo4jTypeRetriever(
-        conn, relationship_types=["UNKNOWN_REL"]
-    )
+    retriever = Neo4jTypeRetriever(conn, relationship_types=["UNKNOWN_REL"])
     specs = await retriever.plan_relationship_fetches(basic_schema)
     assert specs == []
 
