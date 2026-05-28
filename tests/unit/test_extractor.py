@@ -71,3 +71,29 @@ def test_neo4j_record_wrapper_is_json_serializable():
     encoded = json.dumps(wrapper)
 
     assert_that(json.loads(encoded), equal_to({"name": "test", "value": 42}))
+
+
+def test_neo4j_record_wrapper_repr():
+    record = FakeRecord({"name": "alice"})
+    wrapper = Neo4jRecordWrapper(cast(Record, record))
+    assert "Neo4jRecordWrapper" in repr(wrapper)
+    assert "alice" in repr(wrapper)
+
+
+def test_neo4j_extractor_from_file_data(mocker):
+    mocker.patch(
+        "nodestream_plugin_neo4j.extractor.Neo4jDatabaseConnection.from_configuration",
+        return_value=mocker.Mock(),
+    )
+    extractor = Neo4jExtractor.from_file_data(
+        query="MATCH (n) RETURN n SKIP $offset LIMIT $limit",
+        parameters={"x": 1},
+        limit=50,
+        uri="bolt://localhost:7687",
+        username="neo4j",
+        password="password",
+        database_name="neo4j",
+    )
+    assert isinstance(extractor, Neo4jExtractor)
+    assert extractor.limit == 50
+    assert extractor.parameters == {"x": 1}

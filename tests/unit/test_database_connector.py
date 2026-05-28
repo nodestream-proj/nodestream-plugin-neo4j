@@ -71,3 +71,17 @@ def test_from_file_data_with_enterprise_features():
         use_apoc=False,
     )
     assert_that(connector.use_enterprise_features, equal_to(True))
+
+
+def test_make_migrator(mocker):
+    from nodestream_plugin_neo4j.migrator import Neo4jMigrator
+
+    connector = Neo4jDatabaseConnector(
+        database_connection=mocker.Mock(),
+        use_apoc=True,
+        use_enterprise_features=True,
+    )
+    migrator = connector.make_migrator()
+    assert isinstance(migrator, Neo4jMigrator)
+    assert migrator.database_connection is connector.database_connection
+    assert migrator.use_enterprise_features is True
