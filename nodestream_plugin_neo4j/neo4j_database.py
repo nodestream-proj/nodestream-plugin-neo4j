@@ -26,7 +26,9 @@ from neo4j.exceptions import (
 
 try:
     # Introduced in neo4j driver 6.x; replaces ClientError for pool timeout cases.
-    from neo4j.exceptions import ConnectionAcquisitionTimeoutError as _ConnectionAcquisitionTimeoutError
+    from neo4j.exceptions import (
+        ConnectionAcquisitionTimeoutError as _ConnectionAcquisitionTimeoutError,
+    )
 except ImportError:
     _ConnectionAcquisitionTimeoutError = None
 from nodestream.file_io import LazyLoadedArgument
@@ -50,12 +52,12 @@ _RETRYABLE_DNS_ERRNOS = frozenset(
     filter(
         None,
         [
-            getattr(socket, "EAI_AGAIN", None),    # temporary DNS failure
-            getattr(socket, "EAI_NONAME", None),    # host not found (our case)
-            getattr(socket, "EAI_NODATA", None),    # no DNS records
-            getattr(socket, "EAI_ADDRFAMILY", None), # address family not supported
-            getattr(socket, "EAI_MEMORY", None),    # out of memory
-            getattr(socket, "EAI_FAIL", None),      # non-recoverable failure
+            getattr(socket, "EAI_AGAIN", None),  # temporary DNS failure
+            getattr(socket, "EAI_NONAME", None),  # host not found (our case)
+            getattr(socket, "EAI_NODATA", None),  # no DNS records
+            getattr(socket, "EAI_ADDRFAMILY", None),  # address family not supported
+            getattr(socket, "EAI_MEMORY", None),  # out of memory
+            getattr(socket, "EAI_FAIL", None),  # non-recoverable failure
         ],
     )
 )
@@ -87,7 +89,9 @@ def is_retryable(e: Exception) -> bool:
     # fetch_all()/reset() dequeues None instead of a response object, raising:
     # AttributeError: 'NoneType' object has no attribute 'complete'
     # This is a transient connection state issue, not a query or data error.
-    if isinstance(e, AttributeError) and "'NoneType' object has no attribute 'complete'" in str(e):
+    if isinstance(
+        e, AttributeError
+    ) and "'NoneType' object has no attribute 'complete'" in str(e):
         return True
     return False
 
