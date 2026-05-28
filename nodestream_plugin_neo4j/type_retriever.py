@@ -72,14 +72,6 @@ MATCH ()-[r:{relationship_type}]->()
 """
 
 
-# Sentinel object for internal producer/consumer queues inside fetch_relationships.
-class _QueueDone:
-    pass
-
-
-_QUEUE_DONE = _QueueDone()
-
-
 class Neo4jTypeRetriever(TypeRetriever):
     def __init__(
         self,
@@ -96,15 +88,17 @@ class Neo4jTypeRetriever(TypeRetriever):
         shard_size: int | None = None,
         max_shards_per_type: int = 10000,
     ) -> None:
+        super().__init__(
+            concurrency_limit=concurrency_limit,
+            orchestrator_queue_size=orchestrator_queue_size,
+            relationships_only=relationships_only,
+        )
         self.database_connection = database_connection
         self.limit = limit
         self.node_types = node_types or []
         self.relationship_types = relationship_types or []
         self.sample_ratio = sample_ratio if sample_ratio and sample_ratio > 1 else None
         self.latest_hours = latest_hours
-        self.relationships_only = relationships_only
-        self.concurrency_limit = concurrency_limit
-        self.orchestrator_queue_size = orchestrator_queue_size
         self.shard_size = shard_size
         self.max_shards_per_type = max_shards_per_type
 
@@ -397,46 +391,85 @@ class Neo4jTypeRetriever(TypeRetriever):
         return specs
 
     async def fetch_nodes(self, schema: Schema) -> AsyncGenerator[Node, None]:
-        """Yield all nodes across self.node_types, sharded when shard_size is set."""
-        if self.relationships_only:
-            return
+        """Yield all nodes across self.node_types.
+
+        When shard_size is set, each type is split into shard windows and fetched
+        sequentially within each shard. When concurrency_limit > 1 without sharding,
+        one coroutine per node type runs concurrently — the same semaphore semantics
+        as relationship fetching. When both are unset the fetch is fully sequential.
+        """
+        if self.shard_size is not None:
+            async for node in self._fetch_nodes_sharded(schema):
+                yield node
+        elif self.concurrency_limit > 1:
+            async for node in self._fetch_nodes_concurrent(schema):
+                yield node
+        else:
+            async for node in self._fetch_nodes_sequential(schema):
+                yield node
+
+    async def _fetch_nodes_sequential(
+        self, schema: Schema
+    ) -> AsyncGenerator[Node, None]:
         for node_type in self.node_types:
-            cutoff = (
-                datetime.now(timezone.utc) - timedelta(hours=self.latest_hours)
-                if self.latest_hours is not None
-                else None
-            )
-            if self.shard_size is not None:
-                count = await self.preview_node_count(node_type, cutoff=cutoff)
-                key_field = self.key_field_for_node_type(node_type, schema)
-                for shard_offset, shard_limit in self.compute_shards(
-                    count, self.shard_size
+            cutoff = self._snapshot_cutoff()
+            async for node in self.get_nodes_of_type(
+                node_type, schema=schema, cutoff=cutoff
+            ):
+                yield node
+
+    async def _fetch_nodes_sharded(self, schema: Schema) -> AsyncGenerator[Node, None]:
+        for node_type in self.node_types:
+            cutoff = self._snapshot_cutoff()
+            count = await self.preview_node_count(node_type, cutoff=cutoff)
+            key_field = self.key_field_for_node_type(node_type, schema)
+            for shard_offset, shard_limit in self.compute_shards(
+                count, self.shard_size
+            ):
+                async for node in self.get_nodes_of_type_shard(
+                    node_type,
+                    key_field,
+                    shard_offset,
+                    shard_limit,
+                    schema=schema,
+                    cutoff=cutoff,
                 ):
-                    async for node in self.get_nodes_of_type_shard(
-                        node_type,
-                        key_field,
-                        shard_offset,
-                        shard_limit,
-                        schema=schema,
-                        cutoff=cutoff,
-                    ):
-                        yield node
-            else:
+                    yield node
+
+    async def _fetch_nodes_concurrent(
+        self, schema: Schema
+    ) -> AsyncGenerator[Node, None]:
+        """One coroutine per node type, bounded by concurrency_limit."""
+        queue: asyncio.Queue = asyncio.Queue()
+        sem = asyncio.Semaphore(self.concurrency_limit)
+
+        async def fetch_type_into_queue(node_type: str) -> None:
+            async with sem:
+                cutoff = self._snapshot_cutoff()
                 async for node in self.get_nodes_of_type(
                     node_type, schema=schema, cutoff=cutoff
                 ):
-                    yield node
+                    await queue.put(node)
+
+        tasks = [
+            asyncio.create_task(fetch_type_into_queue(node_type))
+            for node_type in self.node_types
+        ]
+        if not tasks:
+            return
+
+        producer = asyncio.create_task(self._await_all(tasks, queue))
+        async for node in self._drain_until_done(queue):
+            yield node
+        await producer
 
     async def fetch_relationships(
         self, schema: Schema
     ) -> AsyncGenerator[RelationshipWithNodes, None]:
-        """Yield all relationships concurrently across all (rel_type, adjacency[, shard]) units.
+        """Yield all relationships across all (rel_type, adjacency[, shard]) units.
 
-        Without sharding: one coroutine per (rel_type, adjacency) pair.
-        With sharding: one coroutine per (rel_type, adjacency, shard) — every shard
-        competes directly for concurrency slots so large types don't starve small ones.
-        Up to self.concurrency_limit units run in parallel. ACTIVE_QUERIES reflects
-        true concurrent Neo4j reads.
+        Up to concurrency_limit units run in parallel, bounded by a semaphore.
+        ACTIVE_QUERIES reflects the number of concurrent Neo4j reads in flight.
         """
         specs = await self.plan_relationship_fetches(schema)
         if not specs:
@@ -445,13 +478,29 @@ class Neo4jTypeRetriever(TypeRetriever):
         queue: asyncio.Queue = asyncio.Queue(maxsize=self.orchestrator_queue_size or 0)
         sem = asyncio.Semaphore(self.concurrency_limit)
 
-        async def fetch_into_queue(
-            rel_type, adj, cutoff, shard_offset, shard_limit, key_field
-        ):
+        tasks = [
+            asyncio.create_task(self._fetch_spec_into_queue(spec, queue, sem, schema))
+            for spec in specs
+        ]
+        producer = asyncio.create_task(self._await_all(tasks, queue))
+        async for relationship in self._drain_until_done(queue):
+            yield relationship
+        await producer
+
+    async def _fetch_spec_into_queue(
+        self,
+        spec: Tuple,
+        queue: asyncio.Queue,
+        sem: asyncio.Semaphore,
+        schema: Schema,
+    ) -> None:
+        """Fetch one (rel_type, adjacency[, shard]) spec and push results into queue."""
+        rel_type, adj, cutoff, shard_offset, shard_limit, key_field = spec
+        async with sem:
             Metrics.get().increment(ACTIVE_QUERIES)
             try:
                 if shard_offset is not None:
-                    gen = self.get_relationships_of_type_between_shard(
+                    generator = self.get_relationships_of_type_between_shard(
                         adj.from_node_type,
                         adj.to_node_type,
                         rel_type,
@@ -462,36 +511,39 @@ class Neo4jTypeRetriever(TypeRetriever):
                         cutoff=cutoff,
                     )
                 else:
-                    gen = self.get_relationships_of_type_between(
+                    generator = self.get_relationships_of_type_between(
                         adj.from_node_type,
                         adj.to_node_type,
                         rel_type,
                         schema=schema,
                         cutoff=cutoff,
                     )
-                async for rwn in gen:
-                    await queue.put(rwn)
+                async for item in generator:
+                    await queue.put(item)
             finally:
                 Metrics.get().decrement(ACTIVE_QUERIES)
 
-        async def run_all_bounded():
-            async def run_bounded(spec):
-                async with sem:
-                    await fetch_into_queue(*spec)
-
-            await asyncio.gather(*(run_bounded(spec) for spec in specs))
-            await queue.put(_QUEUE_DONE)
-
-        producer = asyncio.create_task(run_all_bounded())
-
+    @staticmethod
+    async def _await_all(tasks: list, queue: asyncio.Queue) -> None:
+        """Await all tasks then signal the queue consumer that production is done."""
         try:
-            while True:
-                item = await queue.get()
-                if isinstance(item, _QueueDone):
-                    break
-                yield item
+            await asyncio.gather(*tasks)
         finally:
-            await producer
+            await queue.put(_Done)
+
+    @staticmethod
+    async def _drain_until_done(queue: asyncio.Queue) -> AsyncGenerator:
+        """Yield items from queue until the _Done sentinel is received."""
+        while True:
+            item = await queue.get()
+            if item is _Done:
+                break
+            yield item
+
+    def _snapshot_cutoff(self) -> datetime | None:
+        if self.latest_hours is None:
+            return None
+        return datetime.now(timezone.utc) - timedelta(hours=self.latest_hours)
 
     def key_field_for_node_type(self, node_type: str, schema: Schema) -> Optional[str]:
         if self.latest_hours is not None:
@@ -593,3 +645,8 @@ class Neo4jTypeRetriever(TypeRetriever):
                     record.original["r"], relationship_type=relationship_type
                 ),
             )
+
+
+# Internal sentinel — signals queue consumers that all producers have finished.
+class _Done:
+    pass
