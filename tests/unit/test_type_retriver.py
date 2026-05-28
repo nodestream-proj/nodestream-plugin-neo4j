@@ -11,7 +11,6 @@ from nodestream.schema.state import (
     AdjacencyCardinality,
     Cardinality,
     GraphObjectSchema,
-    GraphObjectType,
     PropertyMetadata,
     PropertyType,
     Schema,
@@ -482,7 +481,6 @@ async def test_get_relationships_of_type_between_shard(subject, mocker):
 
 
 def test_key_field_for_node_type_with_latest_hours(basic_schema):
-    connection_mock = None  # not used by these methods
     import unittest.mock as mock
 
     conn = mock.Mock()

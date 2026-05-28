@@ -370,8 +370,6 @@ async def test_acquire_lock_raises_cannot_acquire_when_execute_fails(
 
 @pytest.mark.asyncio
 async def test_acquire_lock_success(migrator, database_connection, mocker):
-    from nodestream_plugin_neo4j.migrator import CannotAcquireLockException
-
     database_connection.execute.return_value = []
     # Should not raise
     await migrator.acquire_lock()
