@@ -5,11 +5,24 @@ from hamcrest import assert_that, equal_to, has_length
 from neo4j import Record, RoutingControl
 from neo4j.graph import Node as Neo4jNode
 from neo4j.graph import Relationship as Neo4jRelationship
-from nodestream.model import Node, PropertySet, Relationship
+from nodestream.model import Node, PropertySet, Relationship, RelationshipWithNodes
+from nodestream.schema.state import (
+    Adjacency,
+    AdjacencyCardinality,
+    Cardinality,
+    GraphObjectSchema,
+    GraphObjectType,
+    PropertyMetadata,
+    PropertyType,
+    Schema,
+)
 
 from nodestream_plugin_neo4j.extractor import Neo4jRecordWrapper
 from nodestream_plugin_neo4j.neo4j_database import Neo4jDatabaseConnection
-from nodestream_plugin_neo4j.type_retriever import Neo4jTypeRetriever
+from nodestream_plugin_neo4j.type_retriever import (
+    LAST_INGESTED_AT_PROPERTY,
+    Neo4jTypeRetriever,
+)
 
 
 class FakeNeo4jNode(dict):
@@ -291,3 +304,384 @@ async def test_get_relationships_of_type_between(subject, mocker):
     subject.map_neo4j_relationship_to_nodestream_relationship.assert_any_call(
         r1, relationship_type="KNOWS"
     )
+
+
+# -- compute_shards ----------------------------------------------------------
+
+
+def test_compute_shards_zero_count_returns_empty(subject):
+    assert subject.compute_shards(0, 1000) == []
+
+
+def test_compute_shards_negative_shard_size_returns_empty(subject):
+    assert subject.compute_shards(5000, 0) == []
+
+
+# -- Schema fixtures ---------------------------------------------------------
+
+
+@pytest.fixture
+def basic_schema():
+    schema = Schema()
+    person = GraphObjectSchema(
+        name="Person",
+        properties={
+            "name": PropertyMetadata(PropertyType.STRING, is_key=True),
+            "age": PropertyMetadata(PropertyType.INTEGER),
+        },
+    )
+    organization = GraphObjectSchema(
+        name="Organization",
+        properties={
+            "name": PropertyMetadata(PropertyType.STRING),
+        },
+    )
+    best_friend_of = GraphObjectSchema(
+        name="BEST_FRIEND_OF",
+        properties={
+            "since": PropertyMetadata(PropertyType.DATETIME),
+        },
+    )
+    schema.put_node_type(person)
+    schema.put_node_type(organization)
+    schema.put_relationship_type(best_friend_of)
+    schema.add_adjacency(
+        adjacency=Adjacency("Person", "Person", "BEST_FRIEND_OF"),
+        cardinality=AdjacencyCardinality(Cardinality.SINGLE, Cardinality.MANY),
+    )
+    return schema
+
+
+# -- map_neo4j_node_to_nodestream_node with schema (key extraction) ----------
+
+
+def test_map_neo4j_node_to_nodestream_node_with_schema_extracts_keys(
+    subject, basic_schema
+):
+    neo_node = FakeNeo4jNode(("Person",), {"name": "Alice", "age": 30})
+    result = subject.map_neo4j_node_to_nodestream_node(
+        type_cast(Neo4jNode, neo_node), node_type="Person", schema=basic_schema
+    )
+    # "name" is the key field — it should be in key_values, not properties
+    assert "name" in result.key_values
+    assert result.key_values["name"] == "Alice"
+    assert "name" not in result.properties
+
+
+def test_map_neo4j_node_to_nodestream_node_schema_unknown_type(subject, basic_schema):
+    """When node_type has no entry in schema, behaves like schema=None."""
+    neo_node = FakeNeo4jNode(("Unknown",), {"x": 1})
+    result = subject.map_neo4j_node_to_nodestream_node(
+        type_cast(Neo4jNode, neo_node), node_type="Unknown", schema=basic_schema
+    )
+    assert result.type == "Unknown"
+    assert result.properties["x"] == 1
+    assert len(result.key_values) == 0
+
+
+# -- get_node_type_shard_extractor -------------------------------------------
+
+
+def test_get_node_type_shard_extractor_with_key_field(subject):
+    extractor = subject.get_node_type_shard_extractor(
+        "Person", "name", shard_offset=0, shard_limit=1000
+    )
+    assert "ORDER BY n.`name`" in extractor.query
+    assert extractor.parameters["shard_offset"] == 0
+    assert extractor.parameters["shard_limit"] == 1000
+
+
+def test_get_node_type_shard_extractor_without_key_field(subject):
+    extractor = subject.get_node_type_shard_extractor(
+        "Person", None, shard_offset=500, shard_limit=500
+    )
+    assert "ORDER BY elementId(n)" in extractor.query
+    assert extractor.parameters["shard_offset"] == 500
+    assert extractor.parameters["shard_limit"] == 500
+
+
+# -- get_relationships_of_type_between_shard_extractor -----------------------
+
+
+def test_get_relationships_shard_extractor_with_key_field(subject):
+    extractor = subject.get_relationships_of_type_between_shard_extractor(
+        "Person", "Person", "BEST_FRIEND_OF", "since", shard_offset=0, shard_limit=2000
+    )
+    assert "ORDER BY r.`since`" in extractor.query
+    assert extractor.parameters["shard_offset"] == 0
+    assert extractor.parameters["shard_limit"] == 2000
+
+
+def test_get_relationships_shard_extractor_without_key_field(subject):
+    extractor = subject.get_relationships_of_type_between_shard_extractor(
+        "Person", "Person", "BEST_FRIEND_OF", None, shard_offset=100, shard_limit=900
+    )
+    assert "ORDER BY elementId(r)" in extractor.query
+    assert extractor.parameters["shard_offset"] == 100
+    assert extractor.parameters["shard_limit"] == 900
+
+
+# -- get_nodes_of_type_shard -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_nodes_of_type_shard(subject, mocker):
+    subject.map_neo4j_node_to_nodestream_node = mocker.Mock(
+        return_value=Node(type="Person", properties=PropertySet({"name": "p1"}))
+    )
+    subject.get_node_type_shard_extractor = mocker.Mock()
+    extractor = subject.get_node_type_shard_extractor.return_value
+    n1 = FakeNeo4jNode(("Person",), {"name": "p1"})
+    extractor.extract_records.return_value = async_generator(
+        Neo4jRecordWrapper(type_cast(Record, FakeRecord({"n": n1}))),
+    )
+    results = [
+        r async for r in subject.get_nodes_of_type_shard("Person", "name", 0, 1000)
+    ]
+    assert_that(results, has_length(1))
+    subject.get_node_type_shard_extractor.assert_called_once_with(
+        "Person", "name", 0, 1000, cutoff=None
+    )
+
+
+# -- get_relationships_of_type_between_shard ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_relationships_of_type_between_shard(subject, mocker):
+    subject.map_neo4j_node_to_nodestream_node = mocker.Mock(
+        side_effect=lambda n, node_type, schema: Node(
+            type=node_type, properties=PropertySet(dict(n))
+        )
+    )
+    subject.map_neo4j_relationship_to_nodestream_relationship = mocker.Mock(
+        return_value=Relationship(type="BEST_FRIEND_OF", properties=PropertySet({}))
+    )
+    subject.get_relationships_of_type_between_shard_extractor = mocker.Mock()
+    extractor = subject.get_relationships_of_type_between_shard_extractor.return_value
+    a1 = FakeNeo4jNode(("Person",), {"id": 1})
+    b1 = FakeNeo4jNode(("Person",), {"id": 2})
+    r1 = FakeNeo4jRel("BEST_FRIEND_OF", {})
+    extractor.extract_records.return_value = async_generator(
+        Neo4jRecordWrapper(type_cast(Record, FakeRecord({"a": a1, "b": b1, "r": r1}))),
+    )
+    results = [
+        r
+        async for r in subject.get_relationships_of_type_between_shard(
+            "Person", "Person", "BEST_FRIEND_OF", "since", 0, 1000
+        )
+    ]
+    assert_that(results, has_length(1))
+    assert isinstance(results[0], RelationshipWithNodes)
+    subject.get_relationships_of_type_between_shard_extractor.assert_called_once_with(
+        "Person", "Person", "BEST_FRIEND_OF", "since", 0, 1000, cutoff=None
+    )
+
+
+# -- key_field_for_node_type -------------------------------------------------
+
+
+def test_key_field_for_node_type_with_latest_hours(basic_schema):
+    connection_mock = None  # not used by these methods
+    import unittest.mock as mock
+
+    conn = mock.Mock()
+    retriever = Neo4jTypeRetriever(conn, latest_hours=24)
+    assert retriever.key_field_for_node_type("Person", basic_schema) == LAST_INGESTED_AT_PROPERTY
+
+
+def test_key_field_for_node_type_from_schema_keys(basic_schema):
+    import unittest.mock as mock
+
+    conn = mock.Mock()
+    retriever = Neo4jTypeRetriever(conn)  # no latest_hours
+    key = retriever.key_field_for_node_type("Person", basic_schema)
+    # Person has "name" as key field
+    assert key == "name"
+
+
+def test_key_field_for_node_type_no_schema_keys(basic_schema):
+    import unittest.mock as mock
+
+    conn = mock.Mock()
+    retriever = Neo4jTypeRetriever(conn)
+    # Organization has no key fields in our basic_schema fixture
+    key = retriever.key_field_for_node_type("Organization", basic_schema)
+    assert key is None
+
+
+def test_key_field_for_node_type_unknown_type(basic_schema):
+    import unittest.mock as mock
+
+    conn = mock.Mock()
+    retriever = Neo4jTypeRetriever(conn)
+    assert retriever.key_field_for_node_type("Ghost", basic_schema) is None
+
+
+# -- key_field_for_relationship_type -----------------------------------------
+
+
+def test_key_field_for_relationship_type_with_latest_hours(basic_schema):
+    import unittest.mock as mock
+
+    conn = mock.Mock()
+    retriever = Neo4jTypeRetriever(conn, latest_hours=6)
+    assert (
+        retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema)
+        == LAST_INGESTED_AT_PROPERTY
+    )
+
+
+def test_key_field_for_relationship_type_no_latest_hours(basic_schema):
+    import unittest.mock as mock
+
+    conn = mock.Mock()
+    retriever = Neo4jTypeRetriever(conn)
+    assert retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema) is None
+
+
+# -- plan_relationship_fetches -----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_plan_relationship_fetches_no_sharding(mocker, basic_schema):
+    conn = mocker.Mock()
+    retriever = Neo4jTypeRetriever(
+        conn, relationship_types=["BEST_FRIEND_OF"]
+    )
+    specs = await retriever.plan_relationship_fetches(basic_schema)
+    # BEST_FRIEND_OF has one adjacency (Person->Person), no sharding => one spec
+    assert len(specs) == 1
+    rel_type, adj, cutoff, shard_offset, shard_limit, key_field = specs[0]
+    assert rel_type == "BEST_FRIEND_OF"
+    assert adj.from_node_type == "Person"
+    assert adj.to_node_type == "Person"
+    assert shard_offset is None
+    assert shard_limit is None
+    assert key_field is None
+
+
+@pytest.mark.asyncio
+async def test_plan_relationship_fetches_with_sharding(mocker, basic_schema):
+    conn = mocker.Mock()
+    retriever = Neo4jTypeRetriever(
+        conn, relationship_types=["BEST_FRIEND_OF"], shard_size=1000
+    )
+    # count_relationship_type needs the async execute mock
+    retriever.preview_relationship_count = mocker.AsyncMock(return_value=2500)
+    specs = await retriever.plan_relationship_fetches(basic_schema)
+    # 2500 / 1000 = 3 shards, 1 adjacency => 3 specs
+    assert len(specs) == 3
+    offsets = [s[3] for s in specs]
+    assert offsets == [0, 1000, 2000]
+    limits = [s[4] for s in specs]
+    assert limits == [1000, 1000, 500]
+
+
+@pytest.mark.asyncio
+async def test_plan_relationship_fetches_skips_type_with_no_adjacencies(
+    mocker, basic_schema
+):
+    conn = mocker.Mock()
+    retriever = Neo4jTypeRetriever(
+        conn, relationship_types=["UNKNOWN_REL"]
+    )
+    specs = await retriever.plan_relationship_fetches(basic_schema)
+    assert specs == []
+
+
+# -- fetch_nodes -------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_nodes_relationships_only_skips_all(mocker, basic_schema):
+    conn = mocker.Mock()
+    retriever = Neo4jTypeRetriever(conn, node_types=["Person"], relationships_only=True)
+    results = [r async for r in retriever.fetch_nodes(basic_schema)]
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_nodes_no_sharding(mocker, basic_schema):
+    conn = mocker.Mock()
+    retriever = Neo4jTypeRetriever(conn, node_types=["Person"])
+    node = Node(type="Person", properties=PropertySet({"name": "Alice"}))
+    retriever.get_nodes_of_type = mocker.Mock(return_value=async_generator(node))
+    results = [r async for r in retriever.fetch_nodes(basic_schema)]
+    assert results == [node]
+    retriever.get_nodes_of_type.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_nodes_with_sharding(mocker, basic_schema):
+    conn = mocker.Mock()
+    retriever = Neo4jTypeRetriever(conn, node_types=["Person"], shard_size=1000)
+    retriever.preview_node_count = mocker.AsyncMock(return_value=2000)
+    node1 = Node(type="Person", properties=PropertySet({"name": "Alice"}))
+    node2 = Node(type="Person", properties=PropertySet({"name": "Bob"}))
+    retriever.get_nodes_of_type_shard = mocker.Mock(
+        side_effect=[async_generator(node1), async_generator(node2)]
+    )
+    results = [r async for r in retriever.fetch_nodes(basic_schema)]
+    assert results == [node1, node2]
+    # 2000 / 1000 = 2 shards
+    assert retriever.get_nodes_of_type_shard.call_count == 2
+
+
+# -- fetch_relationships -----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_relationships_empty_when_no_specs(mocker, basic_schema):
+    conn = mocker.Mock()
+    retriever = Neo4jTypeRetriever(conn, relationship_types=["UNKNOWN_REL"])
+    results = [r async for r in retriever.fetch_relationships(basic_schema)]
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_relationships_yields_items(mocker, basic_schema):
+    conn = mocker.Mock()
+    retriever = Neo4jTypeRetriever(
+        conn, relationship_types=["BEST_FRIEND_OF"], concurrency_limit=2
+    )
+    rwn = RelationshipWithNodes(
+        from_node=Node(type="Person", properties=PropertySet({})),
+        to_node=Node(type="Person", properties=PropertySet({})),
+        relationship=Relationship(type="BEST_FRIEND_OF", properties=PropertySet({})),
+    )
+    retriever.get_relationships_of_type_between = mocker.Mock(
+        return_value=async_generator(rwn)
+    )
+    retriever.preview_relationship_count = mocker.AsyncMock(return_value=1)
+    results = [r async for r in retriever.fetch_relationships(basic_schema)]
+    assert len(results) == 1
+    assert results[0] == rwn
+
+
+@pytest.mark.asyncio
+async def test_fetch_relationships_with_sharding(mocker, basic_schema):
+    conn = mocker.Mock()
+    retriever = Neo4jTypeRetriever(
+        conn,
+        relationship_types=["BEST_FRIEND_OF"],
+        shard_size=500,
+        concurrency_limit=2,
+    )
+    retriever.preview_relationship_count = mocker.AsyncMock(return_value=1000)
+    rwn1 = RelationshipWithNodes(
+        from_node=Node(type="Person", properties=PropertySet({})),
+        to_node=Node(type="Person", properties=PropertySet({})),
+        relationship=Relationship(type="BEST_FRIEND_OF", properties=PropertySet({})),
+    )
+    rwn2 = RelationshipWithNodes(
+        from_node=Node(type="Person", properties=PropertySet({})),
+        to_node=Node(type="Person", properties=PropertySet({})),
+        relationship=Relationship(type="BEST_FRIEND_OF", properties=PropertySet({})),
+    )
+    retriever.get_relationships_of_type_between_shard = mocker.Mock(
+        side_effect=[async_generator(rwn1), async_generator(rwn2)]
+    )
+    results = [r async for r in retriever.fetch_relationships(basic_schema)]
+    assert len(results) == 2
+    assert retriever.get_relationships_of_type_between_shard.call_count == 2
