@@ -544,23 +544,25 @@ def test_key_field_for_relationship_type_no_latest_hours(basic_schema):
     )
 
 
-# -- _plan_specs (relationship fetch strategies) ------------------------------
+# -- planSpecs (relationship fetch strategies) ------------------------------
 
 
 @pytest.mark.asyncio
 async def test_simple_rel_fetch_plan_specs_no_sharding(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, relationship_types=["BEST_FRIEND_OF"])
-    specs = await retriever.rel_fetch_strategy._plan_specs(basic_schema)
+    fetchSpecs = await retriever.rel_fetch_strategy.planSpecs(basic_schema)
     # BEST_FRIEND_OF has one adjacency (Person->Person), no sharding => one spec
-    assert len(specs) == 1
-    rel_type, adj, cutoff, shard_offset, shard_limit, key_field = specs[0]
-    assert rel_type == "BEST_FRIEND_OF"
-    assert adj.from_node_type == "Person"
-    assert adj.to_node_type == "Person"
-    assert shard_offset is None
-    assert shard_limit is None
-    assert key_field is None
+    assert len(fetchSpecs) == 1
+    relationshipType, adjacency, cutoff, shardOffset, shardLimit, keyField = fetchSpecs[
+        0
+    ]
+    assert relationshipType == "BEST_FRIEND_OF"
+    assert adjacency.from_node_type == "Person"
+    assert adjacency.to_node_type == "Person"
+    assert shardOffset is None
+    assert shardLimit is None
+    assert keyField is None
 
 
 @pytest.mark.asyncio
@@ -570,12 +572,12 @@ async def test_sharded_rel_fetch_plan_specs(mocker, basic_schema):
         conn, relationship_types=["BEST_FRIEND_OF"], shard_size=1000
     )
     retriever.preview_relationship_count = mocker.AsyncMock(return_value=2500)
-    specs = await retriever.rel_fetch_strategy._plan_specs(basic_schema)
+    fetchSpecs = await retriever.rel_fetch_strategy.planSpecs(basic_schema)
     # 2500 / 1000 = 3 shards, 1 adjacency => 3 specs
-    assert len(specs) == 3
-    offsets = [s[3] for s in specs]
+    assert len(fetchSpecs) == 3
+    offsets = [s[3] for s in fetchSpecs]
     assert offsets == [0, 1000, 2000]
-    limits = [s[4] for s in specs]
+    limits = [s[4] for s in fetchSpecs]
     assert limits == [1000, 1000, 500]
 
 
@@ -585,11 +587,11 @@ async def test_simple_rel_fetch_plan_specs_skips_type_with_no_adjacencies(
 ):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, relationship_types=["UNKNOWN_REL"])
-    specs = await retriever.rel_fetch_strategy._plan_specs(basic_schema)
-    assert specs == []
+    fetchSpecs = await retriever.rel_fetch_strategy.planSpecs(basic_schema)
+    assert fetchSpecs == []
 
 
-# -- fetch_nodes -------------------------------------------------------------
+# -- fetchNodes -------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -598,7 +600,7 @@ async def test_fetch_nodes_no_sharding(mocker, basic_schema):
     retriever = Neo4jTypeRetriever(conn, node_types=["Person"])
     node = Node(type="Person", properties=PropertySet({"name": "Alice"}))
     retriever.get_nodes_of_type = mocker.Mock(return_value=async_generator(node))
-    results = [r async for r in retriever.fetch_nodes(basic_schema)]
+    results = [r async for r in retriever.fetchNodes(basic_schema)]
     assert results == [node]
     retriever.get_nodes_of_type.assert_called_once()
 
@@ -613,7 +615,7 @@ async def test_fetch_nodes_with_sharding(mocker, basic_schema):
     retriever.get_nodes_of_type_shard = mocker.Mock(
         side_effect=[async_generator(node1), async_generator(node2)]
     )
-    results = [r async for r in retriever.fetch_nodes(basic_schema)]
+    results = [r async for r in retriever.fetchNodes(basic_schema)]
     assert results == [node1, node2]
     # 2000 / 1000 = 2 shards
     assert retriever.get_nodes_of_type_shard.call_count == 2
@@ -633,21 +635,21 @@ async def test_fetch_nodes_concurrent_without_sharding(mocker, basic_schema):
             async_generator(node1) if node_type == "Person" else async_generator(node2)
         )
     )
-    results = [r async for r in retriever.fetch_nodes(basic_schema)]
+    results = [r async for r in retriever.fetchNodes(basic_schema)]
     assert len(results) == 2
     assert node1 in results
     assert node2 in results
     assert retriever.get_nodes_of_type.call_count == 2
 
 
-# -- fetch_relationships -----------------------------------------------------
+# -- fetchRelationships -----------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_fetch_relationships_empty_when_no_specs(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, relationship_types=["UNKNOWN_REL"])
-    results = [r async for r in retriever.fetch_relationships(basic_schema)]
+    results = [r async for r in retriever.fetchRelationships(basic_schema)]
     assert results == []
 
 
@@ -666,7 +668,7 @@ async def test_fetch_relationships_yields_items(mocker, basic_schema):
         return_value=async_generator(rwn)
     )
     retriever.preview_relationship_count = mocker.AsyncMock(return_value=1)
-    results = [r async for r in retriever.fetch_relationships(basic_schema)]
+    results = [r async for r in retriever.fetchRelationships(basic_schema)]
     assert len(results) == 1
     assert results[0] == rwn
 
@@ -694,6 +696,6 @@ async def test_fetch_relationships_with_sharding(mocker, basic_schema):
     retriever.get_relationships_of_type_between_shard = mocker.Mock(
         side_effect=[async_generator(rwn1), async_generator(rwn2)]
     )
-    results = [r async for r in retriever.fetch_relationships(basic_schema)]
+    results = [r async for r in retriever.fetchRelationships(basic_schema)]
     assert len(results) == 2
     assert retriever.get_relationships_of_type_between_shard.call_count == 2

@@ -64,21 +64,21 @@ MATCH ()-[r:{relationship_type}]->()
 """
 
 
-class _Done:
+class QueueDone:
     """Sentinel that signals queue consumers all producers have finished."""
 
 
-async def _await_all(tasks: list, queue: asyncio.Queue) -> None:
+async def awaitAll(tasks: list, queue: asyncio.Queue) -> None:
     try:
         await asyncio.gather(*tasks)
     finally:
-        await queue.put(_Done)
+        await queue.put(QueueDone)
 
 
-async def _drain_until_done(queue: asyncio.Queue) -> AsyncGenerator:
+async def drainUntilDone(queue: asyncio.Queue) -> AsyncGenerator:
     while True:
         item = await queue.get()
-        if item is _Done:
+        if item is QueueDone:
             break
         yield item
 
@@ -99,28 +99,28 @@ class NodeFetchStrategy(ABC):
 
 class SequentialNodeFetch(NodeFetchStrategy):
     async def fetch(self, schema: Schema) -> AsyncGenerator[Node, None]:
-        for node_type in self.retriever.node_types:
-            cutoff = self.retriever._snapshot_cutoff()
+        for nodeType in self.retriever.node_types:
+            cutoff = self.retriever.snapshotCutoff()
             async for node in self.retriever.get_nodes_of_type(
-                node_type, schema=schema, cutoff=cutoff
+                nodeType, schema=schema, cutoff=cutoff
             ):
                 yield node
 
 
 class ShardedNodeFetch(NodeFetchStrategy):
     async def fetch(self, schema: Schema) -> AsyncGenerator[Node, None]:
-        for node_type in self.retriever.node_types:
-            cutoff = self.retriever._snapshot_cutoff()
-            count = await self.retriever.preview_node_count(node_type, cutoff=cutoff)
-            key_field = self.retriever.key_field_for_node_type(node_type, schema)
-            for shard_offset, shard_limit in self.retriever.compute_shards(
+        for nodeType in self.retriever.node_types:
+            cutoff = self.retriever.snapshotCutoff()
+            count = await self.retriever.preview_node_count(nodeType, cutoff=cutoff)
+            keyField = self.retriever.key_field_for_node_type(nodeType, schema)
+            for shardOffset, shardLimit in self.retriever.compute_shards(
                 count, self.retriever.shard_size
             ):
                 async for node in self.retriever.get_nodes_of_type_shard(
-                    node_type,
-                    key_field,
-                    shard_offset,
-                    shard_limit,
+                    nodeType,
+                    keyField,
+                    shardOffset,
+                    shardLimit,
                     schema=schema,
                     cutoff=cutoff,
                 ):
@@ -130,25 +130,25 @@ class ShardedNodeFetch(NodeFetchStrategy):
 class ConcurrentNodeFetch(NodeFetchStrategy):
     async def fetch(self, schema: Schema) -> AsyncGenerator[Node, None]:
         queue: asyncio.Queue = asyncio.Queue()
-        sem = asyncio.Semaphore(self.retriever.concurrency_limit)
+        semaphore = asyncio.Semaphore(self.retriever.concurrency_limit)
 
-        async def fetch_type(node_type: str) -> None:
-            async with sem:
-                cutoff = self.retriever._snapshot_cutoff()
+        async def fetchType(nodeType: str) -> None:
+            async with semaphore:
+                cutoff = self.retriever.snapshotCutoff()
                 async for node in self.retriever.get_nodes_of_type(
-                    node_type, schema=schema, cutoff=cutoff
+                    nodeType, schema=schema, cutoff=cutoff
                 ):
                     await queue.put(node)
 
         tasks = [
-            asyncio.create_task(fetch_type(node_type))
-            for node_type in self.retriever.node_types
+            asyncio.create_task(fetchType(nodeType))
+            for nodeType in self.retriever.node_types
         ]
         if not tasks:
             return
 
-        producer = asyncio.create_task(_await_all(tasks, queue))
-        async for node in _drain_until_done(queue):
+        producer = asyncio.create_task(awaitAll(tasks, queue))
+        async for node in drainUntilDone(queue):
             yield node
         await producer
 
@@ -159,42 +159,42 @@ class ConcurrentNodeFetch(NodeFetchStrategy):
 
 
 class RelFetchStrategy(ABC):
-    """Template: subclasses implement _plan_specs; fetch and _fetch_spec are shared."""
+    """Template: subclasses implement planSpecs; fetch and fetchSpecIntoQueue are shared."""
 
     def __init__(self, retriever: "Neo4jTypeRetriever") -> None:
         self.retriever = retriever
 
     @abstractmethod
-    async def _plan_specs(self, schema: Schema) -> List[Tuple]:
+    async def planSpecs(self, schema: Schema) -> List[Tuple]:
         ...
 
-    async def _fetch_spec_into_queue(
+    async def fetchSpecIntoQueue(
         self,
         spec: Tuple,
         queue: asyncio.Queue,
-        sem: asyncio.Semaphore,
+        semaphore: asyncio.Semaphore,
         schema: Schema,
     ) -> None:
-        rel_type, adj, cutoff, shard_offset, shard_limit, key_field = spec
-        async with sem:
+        relationshipType, adjacency, cutoff, shardOffset, shardLimit, keyField = spec
+        async with semaphore:
             Metrics.get().increment(ACTIVE_QUERIES)
             try:
-                if shard_offset is not None:
+                if shardOffset is not None:
                     generator = self.retriever.get_relationships_of_type_between_shard(
-                        adj.from_node_type,
-                        adj.to_node_type,
-                        rel_type,
-                        key_field,
-                        shard_offset,
-                        shard_limit,
+                        adjacency.from_node_type,
+                        adjacency.to_node_type,
+                        relationshipType,
+                        keyField,
+                        shardOffset,
+                        shardLimit,
                         schema=schema,
                         cutoff=cutoff,
                     )
                 else:
                     generator = self.retriever.get_relationships_of_type_between(
-                        adj.from_node_type,
-                        adj.to_node_type,
-                        rel_type,
+                        adjacency.from_node_type,
+                        adjacency.to_node_type,
+                        relationshipType,
                         schema=schema,
                         cutoff=cutoff,
                     )
@@ -206,73 +206,89 @@ class RelFetchStrategy(ABC):
     async def fetch(
         self, schema: Schema
     ) -> AsyncGenerator[RelationshipWithNodes, None]:
-        specs = await self._plan_specs(schema)
-        if not specs:
+        fetchSpecs = await self.planSpecs(schema)
+        if not fetchSpecs:
             return
 
         queue: asyncio.Queue = asyncio.Queue(
             maxsize=self.retriever.orchestrator_queue_size or 0
         )
-        sem = asyncio.Semaphore(self.retriever.concurrency_limit)
+        semaphore = asyncio.Semaphore(self.retriever.concurrency_limit)
         tasks = [
-            asyncio.create_task(self._fetch_spec_into_queue(spec, queue, sem, schema))
-            for spec in specs
+            asyncio.create_task(self.fetchSpecIntoQueue(spec, queue, semaphore, schema))
+            for spec in fetchSpecs
         ]
-        producer = asyncio.create_task(_await_all(tasks, queue))
-        async for relationship in _drain_until_done(queue):
+        producer = asyncio.create_task(awaitAll(tasks, queue))
+        async for relationship in drainUntilDone(queue):
             yield relationship
         await producer
 
 
 class SimpleRelFetch(RelFetchStrategy):
-    """One spec per (rel_type, adjacency) — no COUNT queries, no sharding."""
+    """One spec per (relationshipType, adjacency) — no COUNT queries, no sharding."""
 
-    async def _plan_specs(self, schema: Schema) -> List[Tuple]:
-        specs = []
-        for rel_type in self.retriever.relationship_types:
-            adjacencies = list(schema.get_adjacencies_by_relationship_type(rel_type))
+    async def planSpecs(self, schema: Schema) -> List[Tuple]:
+        fetchSpecs = []
+        for relationshipType in self.retriever.relationship_types:
+            adjacencies = list(
+                schema.get_adjacencies_by_relationship_type(relationshipType)
+            )
             if not adjacencies:
                 continue
-            cutoff = self.retriever._snapshot_cutoff()
-            for adj in adjacencies:
-                specs.append((rel_type, adj, cutoff, None, None, None))
-        return specs
+            cutoff = self.retriever.snapshotCutoff()
+            for adjacency in adjacencies:
+                fetchSpecs.append(
+                    (relationshipType, adjacency, cutoff, None, None, None)
+                )
+        return fetchSpecs
 
 
 class ShardedRelFetch(RelFetchStrategy):
-    """Fires concurrent COUNTs first, then one spec per (rel_type, adjacency, shard)."""
+    """Fires concurrent COUNTs first, then one spec per (relationshipType, adjacency, shard)."""
 
-    async def _plan_specs(self, schema: Schema) -> List[Tuple]:
-        rel_type_adjacencies = []
-        for rel_type in self.retriever.relationship_types:
-            adjacencies = list(schema.get_adjacencies_by_relationship_type(rel_type))
+    async def planSpecs(self, schema: Schema) -> List[Tuple]:
+        relationshipTypeAdjacencies = []
+        for relationshipType in self.retriever.relationship_types:
+            adjacencies = list(
+                schema.get_adjacencies_by_relationship_type(relationshipType)
+            )
             if not adjacencies:
                 continue
-            cutoff = self.retriever._snapshot_cutoff()
-            rel_type_adjacencies.append((rel_type, adjacencies, cutoff))
+            cutoff = self.retriever.snapshotCutoff()
+            relationshipTypeAdjacencies.append((relationshipType, adjacencies, cutoff))
 
-        count_results = await asyncio.gather(
+        countResults = await asyncio.gather(
             *(
-                self.retriever.count_relationship_type(rel_type, cutoff)
-                for rel_type, _, cutoff in rel_type_adjacencies
+                self.retriever.count_relationship_type(relationshipType, cutoff)
+                for relationshipType, _, cutoff in relationshipTypeAdjacencies
             )
         )
         counts = {
-            rel_type: (count, cutoff) for rel_type, count, cutoff in count_results
+            relationshipType: (count, cutoff)
+            for relationshipType, count, cutoff in countResults
         }
 
-        specs = []
-        for rel_type, adjacencies, _ in rel_type_adjacencies:
-            count, cutoff = counts[rel_type]
-            key_field = self.retriever.key_field_for_relationship_type(rel_type, schema)
-            for shard_offset, shard_limit in self.retriever.compute_shards(
+        fetchSpecs = []
+        for relationshipType, adjacencies, _ in relationshipTypeAdjacencies:
+            count, cutoff = counts[relationshipType]
+            keyField = self.retriever.key_field_for_relationship_type(
+                relationshipType, schema
+            )
+            for shardOffset, shardLimit in self.retriever.compute_shards(
                 count, self.retriever.shard_size
             ):
-                for adj in adjacencies:
-                    specs.append(
-                        (rel_type, adj, cutoff, shard_offset, shard_limit, key_field)
+                for adjacency in adjacencies:
+                    fetchSpecs.append(
+                        (
+                            relationshipType,
+                            adjacency,
+                            cutoff,
+                            shardOffset,
+                            shardLimit,
+                            keyField,
+                        )
                     )
-        return specs
+        return fetchSpecs
 
 
 # ---------------------------------------------------------------------------
@@ -321,15 +337,15 @@ class Neo4jTypeRetriever(TypeRetriever):
             self.node_fetch_strategy = SequentialNodeFetch(self)
             self.rel_fetch_strategy = SimpleRelFetch(self)
 
-    async def fetch_nodes(self, schema: Schema) -> AsyncGenerator[Node, None]:
+    async def fetchNodes(self, schema: Schema) -> AsyncGenerator[Node, None]:
         async for node in self.node_fetch_strategy.fetch(schema):
             yield node
 
-    async def fetch_relationships(
+    async def fetchRelationships(
         self, schema: Schema
     ) -> AsyncGenerator[RelationshipWithNodes, None]:
-        async for rel in self.rel_fetch_strategy.fetch(schema):
-            yield rel
+        async for relationship in self.rel_fetch_strategy.fetch(schema):
+            yield relationship
 
     # -- Mapping helpers --------------------------------------------------------
 
@@ -337,21 +353,21 @@ class Neo4jTypeRetriever(TypeRetriever):
         self, node: Neo4jNode, node_type: str, schema: Schema | None = None
     ) -> Node:
         properties = PropertySet(node)
-        key_values = PropertySet.empty()
+        keyValues = PropertySet.empty()
         if schema is not None:
-            node_schema = schema.get_node_type_by_name(node_type)
-            if node_schema is not None:
-                for key in node_schema.keys:
+            nodeSchema = schema.get_node_type_by_name(node_type)
+            if nodeSchema is not None:
+                for key in nodeSchema.keys:
                     if key in properties:
-                        key_values[key] = properties.pop(key)
-        additional_types: List[str] = [
+                        keyValues[key] = properties.pop(key)
+        additionalTypes: List[str] = [
             label for label in node.labels if label != node_type
         ]
         return Node(
             type=node_type,
             properties=properties,
-            key_values=key_values,
-            additional_types=additional_types,
+            key_values=keyValues,
+            additional_types=additionalTypes,
         )
 
     def map_neo4j_relationship_to_nodestream_relationship(
@@ -519,13 +535,13 @@ class Neo4jTypeRetriever(TypeRetriever):
     ) -> List[Tuple[int, int]]:
         if total_count <= 0 or shard_size <= 0:
             return []
-        num_shards = math.ceil(total_count / shard_size)
+        numShards = math.ceil(total_count / shard_size)
         return [
             (i * shard_size, min(shard_size, total_count - i * shard_size))
-            for i in range(num_shards)
+            for i in range(numShards)
         ]
 
-    def _snapshot_cutoff(self) -> datetime | None:
+    def snapshotCutoff(self) -> datetime | None:
         if self.latest_hours is None:
             return None
         return datetime.now(timezone.utc) - timedelta(hours=self.latest_hours)
@@ -533,9 +549,9 @@ class Neo4jTypeRetriever(TypeRetriever):
     def key_field_for_node_type(self, node_type: str, schema: Schema) -> Optional[str]:
         if self.latest_hours is not None:
             return LAST_INGESTED_AT_PROPERTY
-        node_schema = schema.get_node_type_by_name(node_type)
-        if node_schema and node_schema.keys:
-            return next(iter(node_schema.keys))
+        nodeSchema = schema.get_node_type_by_name(node_type)
+        if nodeSchema and nodeSchema.keys:
+            return next(iter(nodeSchema.keys))
         return None
 
     def key_field_for_relationship_type(
