@@ -1,5 +1,4 @@
 import asyncio
-import socket
 from logging import getLogger
 from typing import Awaitable, Callable, Iterable, Tuple, Union
 
@@ -25,42 +24,26 @@ from neo4j.exceptions import (
 )
 
 try:
-    # Introduced in neo4j driver 6.x; replaces ClientError for pool timeout cases.
-    from neo4j.exceptions import (
-        ConnectionAcquisitionTimeoutError as _ConnectionAcquisitionTimeoutError,
-    )
+    from neo4j.exceptions import ConnectionAcquisitionTimeoutError
 except ImportError:
-    _ConnectionAcquisitionTimeoutError = None
+    ConnectionAcquisitionTimeoutError = None  # type: ignore[assignment,misc]
 from nodestream.file_io import LazyLoadedArgument
 
 from .query import Query
 from .result import Neo4jQueryStatistics, Neo4jResult
 
-RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
-# ConnectionAcquisitionTimeoutError is a DriverError (not Neo4jError) introduced
-# in neo4j driver 6.x. It replaces ClientError for pool timeout cases and is
-# transient — the pool may free up on retry after driver rotation.
-if _ConnectionAcquisitionTimeoutError is not None:
-    RETRYABLE_EXCEPTIONS = (*RETRYABLE_EXCEPTIONS, _ConnectionAcquisitionTimeoutError)
-AUTH_RATE_LIMIT_CODE = "Neo.ClientError.Security.AuthenticationRateLimit"
-
-# EAI errnos that indicate a transient DNS failure from getaddrinfo.
-# In neo4j driver <6.0, these surface as ValueError("Cannot resolve address ...")
-# with __cause__ being a socket.gaierror. Driver >=6.0 raises ServiceUnavailable
-# directly for these, so this check becomes a no-op on 6.x.
-_RETRYABLE_DNS_ERRNOS = frozenset(
-    filter(
-        None,
-        [
-            getattr(socket, "EAI_AGAIN", None),  # temporary DNS failure
-            getattr(socket, "EAI_NONAME", None),  # host not found (our case)
-            getattr(socket, "EAI_NODATA", None),  # no DNS records
-            getattr(socket, "EAI_ADDRFAMILY", None),  # address family not supported
-            getattr(socket, "EAI_MEMORY", None),  # out of memory
-            getattr(socket, "EAI_FAIL", None),  # non-recoverable failure
-        ],
+RETRYABLE_EXCEPTIONS = tuple(
+    e
+    for e in (
+        TransientError,
+        ServiceUnavailable,
+        SessionExpired,
+        AuthError,
+        ConnectionAcquisitionTimeoutError,
     )
+    if e is not None
 )
+AUTH_RATE_LIMIT_CODE = "Neo.ClientError.Security.AuthenticationRateLimit"
 
 
 def is_retryable(e: Exception) -> bool:
@@ -69,26 +52,12 @@ def is_retryable(e: Exception) -> bool:
     # AuthenticationRateLimit is a ClientError (not AuthError) but is transient.
     if isinstance(e, ClientError) and getattr(e, "code", None) == AUTH_RATE_LIMIT_CODE:
         return True
-    # neo4j driver <6.0 wraps transient DNS failures (socket.gaierror) as
-    # ValueError("Cannot resolve address ...") instead of ServiceUnavailable.
-    # Match only on DNS-specific EAI errnos to avoid catching unrelated ValueErrors
-    # (e.g. bad query parameters) or unrelated OSErrors (e.g. permission denied).
-    if (
-        isinstance(e, ValueError)
-        and isinstance(e.__cause__, OSError)
-        and e.__cause__.errno in _RETRYABLE_DNS_ERRNOS
-    ):
-        return True
-    # In neo4j driver 6.x with uvloop, an exhausted connection_acquisition_timeout
-    # deadline causes uvloop to receive ssl_handshake_timeout=0, raising:
-    # ValueError("ssl_handshake_timeout should be a positive number, got 0")
-    # This has no __cause__ and no typed neo4j exception — match on message.
+    # uvloop bug: exhausted connection_acquisition_timeout causes uvloop to receive
+    # ssl_handshake_timeout=0, raising ValueError with no typed neo4j exception.
     if isinstance(e, ValueError) and "ssl_handshake_timeout" in str(e):
         return True
-    # neo4j driver 6.x bug: when a connection is in a broken state during rotation,
-    # fetch_all()/reset() dequeues None instead of a response object, raising:
-    # AttributeError: 'NoneType' object has no attribute 'complete'
-    # This is a transient connection state issue, not a query or data error.
+    # Driver 6.x bug: broken connection during rotation causes fetch_all()/reset()
+    # to dequeue None, raising AttributeError: 'NoneType' object has no attribute 'complete'.
     if isinstance(
         e, AttributeError
     ) and "'NoneType' object has no attribute 'complete'" in str(e):

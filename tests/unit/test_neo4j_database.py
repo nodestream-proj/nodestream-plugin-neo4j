@@ -336,18 +336,6 @@ def test_is_retryable_auth_rate_limit():
     assert is_retryable(e)
 
 
-def test_is_retryable_dns_value_error():
-    import socket
-
-    from nodestream_plugin_neo4j.neo4j_database import is_retryable
-
-    cause = OSError()
-    cause.errno = getattr(socket, "EAI_AGAIN", 11)
-    err = ValueError("Cannot resolve address ...")
-    err.__cause__ = cause
-    assert is_retryable(err)
-
-
 def test_is_retryable_ssl_handshake_value_error():
     from nodestream_plugin_neo4j.neo4j_database import is_retryable
 

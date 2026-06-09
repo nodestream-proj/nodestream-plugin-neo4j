@@ -10,7 +10,6 @@ No lock internals are inspected — only observable call counts on the drivers.
 """
 
 import asyncio
-import socket
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -126,31 +125,6 @@ async def test_auth_rate_limit_error_treated_as_retryable(mocker):
     assert bad_driver.execute_query.call_count == 1
     assert good_driver.execute_query.call_count == 1
 
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_dns_resolution_failure_treated_as_retryable(mocker):
-    """
-    In neo4j driver <6.0, transient DNS failures surface as ValueError("Cannot
-    resolve address ...") with __cause__ being a socket.gaierror with a DNS-
-    specific EAI errno. This should be treated as retryable so that a transient
-    network blip does not kill the pipeline.
-
-    Unrelated ValueErrors (bad query params) and unrelated OSErrors (permission
-    denied) are NOT retried — only EAI errnos from getaddrinfo are matched.
-    """
-    dns_error = socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided")
-    dns_value_error = ValueError("Cannot resolve address neo4j.example.com:7687")
-    dns_value_error.__cause__ = dns_error
-
-    bad_driver = make_bad_driver(mocker, dns_value_error)
-    good_driver = make_good_driver(mocker)
-
-    db = make_db([bad_driver, good_driver])
-    await db.execute(A_QUERY)
-
-    assert bad_driver.execute_query.call_count == 1
-    assert good_driver.execute_query.call_count == 1
 
 
 # ---------------------------------------------------------------------------

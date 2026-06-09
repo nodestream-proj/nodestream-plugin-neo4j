@@ -32,25 +32,25 @@ MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
 FETCH_NODES_SHARD_QUERY_FORMAT = """\
 MATCH (n:{type})
 {where}WITH n ORDER BY n.`{key_field}` SKIP $shard_offset LIMIT $shard_limit
-RETURN n SKIP $offset LIMIT $limit
+RETURN n
 """
 
 FETCH_RELATIONSHIPS_SHARD_QUERY_FORMAT = """\
 MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
 {where}WITH a, r, b ORDER BY r.`{key_field}` SKIP $shard_offset LIMIT $shard_limit
-RETURN a, r, b SKIP $offset LIMIT $limit
+RETURN a, r, b
 """
 
 FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT = """\
 MATCH (n:{type})
 {where}WITH n ORDER BY elementId(n) SKIP $shard_offset LIMIT $shard_limit
-RETURN n SKIP $offset LIMIT $limit
+RETURN n
 """
 
 FETCH_RELATIONSHIPS_SHARD_ELEMENTID_QUERY_FORMAT = """\
 MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
 {where}WITH a, r, b ORDER BY elementId(r) SKIP $shard_offset LIMIT $shard_limit
-RETURN a, r, b SKIP $offset LIMIT $limit
+RETURN a, r, b
 """
 
 COUNT_NODES_BY_TYPE_QUERY_FORMAT = """\
@@ -415,21 +415,21 @@ class Neo4jTypeRetriever(TypeRetriever):
             limit=self.limit,
         )
 
-    def get_node_type_shard_extractor(
+    async def execute_node_shard_query(
         self,
         node_type: str,
         key_field: Optional[str],
         shard_offset: int,
         shard_limit: int,
         cutoff: datetime | None = None,
-    ) -> Neo4jExtractor:
+    ):
         where = self.build_where_clause("n")
         if key_field:
-            query = FETCH_NODES_SHARD_QUERY_FORMAT.format(
+            statement = FETCH_NODES_SHARD_QUERY_FORMAT.format(
                 type=node_type, where=where, key_field=key_field
             )
         else:
-            query = FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT.format(
+            statement = FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT.format(
                 type=node_type, where=where
             )
         params = dict(
@@ -437,8 +437,8 @@ class Neo4jTypeRetriever(TypeRetriever):
             shard_offset=shard_offset,
             shard_limit=shard_limit,
         )
-        return Neo4jExtractor(
-            query, self.database_connection, parameters=params, limit=self.limit
+        return await self.database_connection.execute(
+            Query(statement, params), routing_=RoutingControl.READ
         )
 
     def get_relationships_of_type_between_extractor(
@@ -461,7 +461,7 @@ class Neo4jTypeRetriever(TypeRetriever):
             limit=self.limit,
         )
 
-    def get_relationships_of_type_between_shard_extractor(
+    async def execute_relationship_shard_query(
         self,
         from_node_type: str,
         to_node_type: str,
@@ -470,10 +470,10 @@ class Neo4jTypeRetriever(TypeRetriever):
         shard_offset: int,
         shard_limit: int,
         cutoff: datetime | None = None,
-    ) -> Neo4jExtractor:
+    ):
         where = self.build_where_clause("r", sample=True)
         if key_field:
-            query = FETCH_RELATIONSHIPS_SHARD_QUERY_FORMAT.format(
+            statement = FETCH_RELATIONSHIPS_SHARD_QUERY_FORMAT.format(
                 from_node_type=from_node_type,
                 relationship_type=relationship_type,
                 to_node_type=to_node_type,
@@ -481,7 +481,7 @@ class Neo4jTypeRetriever(TypeRetriever):
                 key_field=key_field,
             )
         else:
-            query = FETCH_RELATIONSHIPS_SHARD_ELEMENTID_QUERY_FORMAT.format(
+            statement = FETCH_RELATIONSHIPS_SHARD_ELEMENTID_QUERY_FORMAT.format(
                 from_node_type=from_node_type,
                 relationship_type=relationship_type,
                 to_node_type=to_node_type,
@@ -492,8 +492,8 @@ class Neo4jTypeRetriever(TypeRetriever):
             shard_offset=shard_offset,
             shard_limit=shard_limit,
         )
-        return Neo4jExtractor(
-            query, self.database_connection, parameters=params, limit=self.limit
+        return await self.database_connection.execute(
+            Query(statement, params), routing_=RoutingControl.READ
         )
 
     # -- Count helpers ----------------------------------------------------------
@@ -582,12 +582,12 @@ class Neo4jTypeRetriever(TypeRetriever):
         schema: Schema | None = None,
         cutoff: datetime | None = None,
     ) -> AsyncGenerator[Node, None]:
-        extractor = self.get_node_type_shard_extractor(
+        records = await self.execute_node_shard_query(
             node_type, key_field, shard_offset, shard_limit, cutoff=cutoff
         )
-        async for record in extractor.extract_records():
+        for record in records:
             yield self.map_neo4j_node_to_nodestream_node(
-                record.original["n"], node_type=node_type, schema=schema
+                record["n"], node_type=node_type, schema=schema
             )
 
     async def get_relationships_of_type_between(
@@ -625,7 +625,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         schema: Schema | None = None,
         cutoff: datetime | None = None,
     ) -> AsyncGenerator[RelationshipWithNodes, None]:
-        extractor = self.get_relationships_of_type_between_shard_extractor(
+        records = await self.execute_relationship_shard_query(
             from_node_type,
             to_node_type,
             relationship_type,
@@ -634,15 +634,15 @@ class Neo4jTypeRetriever(TypeRetriever):
             shard_limit,
             cutoff=cutoff,
         )
-        async for record in extractor.extract_records():
+        for record in records:
             yield RelationshipWithNodes(
                 from_node=self.map_neo4j_node_to_nodestream_node(
-                    record.original["a"], node_type=from_node_type, schema=schema
+                    record["a"], node_type=from_node_type, schema=schema
                 ),
                 to_node=self.map_neo4j_node_to_nodestream_node(
-                    record.original["b"], node_type=to_node_type, schema=schema
+                    record["b"], node_type=to_node_type, schema=schema
                 ),
                 relationship=self.map_neo4j_relationship_to_nodestream_relationship(
-                    record.original["r"], relationship_type=relationship_type
+                    record["r"], relationship_type=relationship_type
                 ),
             )

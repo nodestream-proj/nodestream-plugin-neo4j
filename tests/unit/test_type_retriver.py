@@ -378,46 +378,62 @@ def test_map_neo4j_node_to_nodestream_node_schema_unknown_type(subject, basic_sc
     assert len(result.key_values) == 0
 
 
-# -- get_node_type_shard_extractor -------------------------------------------
+# -- execute_node_shard_query ------------------------------------------------
 
 
-def test_get_node_type_shard_extractor_with_key_field(subject):
-    extractor = subject.get_node_type_shard_extractor(
+@pytest.mark.asyncio
+async def test_execute_node_shard_query_with_key_field(subject, mocker):
+    subject.database_connection.execute = mocker.AsyncMock(return_value=[])
+    await subject.execute_node_shard_query(
         "Person", "name", shard_offset=0, shard_limit=1000
     )
-    assert "ORDER BY n.`name`" in extractor.query
-    assert extractor.parameters["shard_offset"] == 0
-    assert extractor.parameters["shard_limit"] == 1000
+    call_args = subject.database_connection.execute.call_args
+    query = call_args[0][0]
+    assert "ORDER BY n.`name`" in query.query_statement
+    assert query.parameters["shard_offset"] == 0
+    assert query.parameters["shard_limit"] == 1000
 
 
-def test_get_node_type_shard_extractor_without_key_field(subject):
-    extractor = subject.get_node_type_shard_extractor(
+@pytest.mark.asyncio
+async def test_execute_node_shard_query_without_key_field(subject, mocker):
+    subject.database_connection.execute = mocker.AsyncMock(return_value=[])
+    await subject.execute_node_shard_query(
         "Person", None, shard_offset=500, shard_limit=500
     )
-    assert "ORDER BY elementId(n)" in extractor.query
-    assert extractor.parameters["shard_offset"] == 500
-    assert extractor.parameters["shard_limit"] == 500
+    call_args = subject.database_connection.execute.call_args
+    query = call_args[0][0]
+    assert "ORDER BY elementId(n)" in query.query_statement
+    assert query.parameters["shard_offset"] == 500
+    assert query.parameters["shard_limit"] == 500
 
 
-# -- get_relationships_of_type_between_shard_extractor -----------------------
+# -- execute_relationship_shard_query ----------------------------------------
 
 
-def test_get_relationships_shard_extractor_with_key_field(subject):
-    extractor = subject.get_relationships_of_type_between_shard_extractor(
+@pytest.mark.asyncio
+async def test_execute_relationship_shard_query_with_key_field(subject, mocker):
+    subject.database_connection.execute = mocker.AsyncMock(return_value=[])
+    await subject.execute_relationship_shard_query(
         "Person", "Person", "BEST_FRIEND_OF", "since", shard_offset=0, shard_limit=2000
     )
-    assert "ORDER BY r.`since`" in extractor.query
-    assert extractor.parameters["shard_offset"] == 0
-    assert extractor.parameters["shard_limit"] == 2000
+    call_args = subject.database_connection.execute.call_args
+    query = call_args[0][0]
+    assert "ORDER BY r.`since`" in query.query_statement
+    assert query.parameters["shard_offset"] == 0
+    assert query.parameters["shard_limit"] == 2000
 
 
-def test_get_relationships_shard_extractor_without_key_field(subject):
-    extractor = subject.get_relationships_of_type_between_shard_extractor(
+@pytest.mark.asyncio
+async def test_execute_relationship_shard_query_without_key_field(subject, mocker):
+    subject.database_connection.execute = mocker.AsyncMock(return_value=[])
+    await subject.execute_relationship_shard_query(
         "Person", "Person", "BEST_FRIEND_OF", None, shard_offset=100, shard_limit=900
     )
-    assert "ORDER BY elementId(r)" in extractor.query
-    assert extractor.parameters["shard_offset"] == 100
-    assert extractor.parameters["shard_limit"] == 900
+    call_args = subject.database_connection.execute.call_args
+    query = call_args[0][0]
+    assert "ORDER BY elementId(r)" in query.query_statement
+    assert query.parameters["shard_offset"] == 100
+    assert query.parameters["shard_limit"] == 900
 
 
 # -- get_nodes_of_type_shard -------------------------------------------------
@@ -428,17 +444,15 @@ async def test_get_nodes_of_type_shard(subject, mocker):
     subject.map_neo4j_node_to_nodestream_node = mocker.Mock(
         return_value=Node(type="Person", properties=PropertySet({"name": "p1"}))
     )
-    subject.get_node_type_shard_extractor = mocker.Mock()
-    extractor = subject.get_node_type_shard_extractor.return_value
     n1 = FakeNeo4jNode(("Person",), {"name": "p1"})
-    extractor.extract_records.return_value = async_generator(
-        Neo4jRecordWrapper(type_cast(Record, FakeRecord({"n": n1}))),
+    subject.execute_node_shard_query = mocker.AsyncMock(
+        return_value=[FakeRecord({"n": n1})]
     )
     results = [
         r async for r in subject.get_nodes_of_type_shard("Person", "name", 0, 1000)
     ]
     assert_that(results, has_length(1))
-    subject.get_node_type_shard_extractor.assert_called_once_with(
+    subject.execute_node_shard_query.assert_called_once_with(
         "Person", "name", 0, 1000, cutoff=None
     )
 
@@ -456,13 +470,11 @@ async def test_get_relationships_of_type_between_shard(subject, mocker):
     subject.map_neo4j_relationship_to_nodestream_relationship = mocker.Mock(
         return_value=Relationship(type="BEST_FRIEND_OF", properties=PropertySet({}))
     )
-    subject.get_relationships_of_type_between_shard_extractor = mocker.Mock()
-    extractor = subject.get_relationships_of_type_between_shard_extractor.return_value
     a1 = FakeNeo4jNode(("Person",), {"id": 1})
     b1 = FakeNeo4jNode(("Person",), {"id": 2})
     r1 = FakeNeo4jRel("BEST_FRIEND_OF", {})
-    extractor.extract_records.return_value = async_generator(
-        Neo4jRecordWrapper(type_cast(Record, FakeRecord({"a": a1, "b": b1, "r": r1}))),
+    subject.execute_relationship_shard_query = mocker.AsyncMock(
+        return_value=[FakeRecord({"a": a1, "b": b1, "r": r1})]
     )
     results = [
         r
@@ -472,7 +484,7 @@ async def test_get_relationships_of_type_between_shard(subject, mocker):
     ]
     assert_that(results, has_length(1))
     assert isinstance(results[0], RelationshipWithNodes)
-    subject.get_relationships_of_type_between_shard_extractor.assert_called_once_with(
+    subject.execute_relationship_shard_query.assert_called_once_with(
         "Person", "Person", "BEST_FRIEND_OF", "since", 0, 1000, cutoff=None
     )
 
