@@ -1,4 +1,5 @@
 from hamcrest import assert_that, equal_to, is_
+from nodestream.schema.state import Schema
 
 from nodestream_plugin_neo4j import Neo4jDatabaseConnector
 from nodestream_plugin_neo4j.query_executor import Neo4jQueryExecutor
@@ -23,7 +24,7 @@ def test_make_type_retriever_defaults(mocker):
         use_apoc=True,
         use_enterprise_features=True,
     )
-    retriever = connector.make_type_retriever()
+    retriever = connector.make_type_retriever(schema=Schema())
     assert isinstance(retriever, Neo4jTypeRetriever)
     assert_that(retriever.database_connection, equal_to(connector.database_connection))
     assert_that(retriever.limit, equal_to(1000))
@@ -38,6 +39,7 @@ def test_make_type_retriever_with_filters(mocker):
         use_enterprise_features=True,
     )
     retriever = connector.make_type_retriever(
+        schema=Schema(),
         limit=500,
         sample_ratio=3,
         latest_hours=24,
