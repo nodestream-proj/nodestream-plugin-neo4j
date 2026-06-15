@@ -386,24 +386,24 @@ def test_key_field_for_relationship_type_no_latest_hours(basic_schema):
     assert retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema) is None
 
 
-# -- fetchNodeExtractors / fetchRelationshipExtractors ----------------------
+# -- fetchExtractors --------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_fetch_node_extractors_no_sharding(mocker, basic_schema):
+async def test_fetch_extractors_node_only_no_sharding(mocker, basic_schema):
     conn = mocker.Mock()
-    retriever = Neo4jTypeRetriever(conn, basic_schema, node_types=["Person"])
-    extractors = [e async for e in retriever.fetchNodeExtractors()]
+    retriever = Neo4jTypeRetriever(conn, basic_schema, node_types=["Person"], node_only=True)
+    extractors = [e async for e in retriever.fetchExtractors()]
     assert_that(extractors, has_length(1))
     assert isinstance(extractors[0], MappingExtractor)
 
 
 @pytest.mark.asyncio
-async def test_fetch_node_extractors_with_sharding(mocker, basic_schema):
+async def test_fetch_extractors_node_only_with_sharding(mocker, basic_schema):
     conn = mocker.Mock()
-    retriever = Neo4jTypeRetriever(conn, basic_schema, node_types=["Person"], shard_size=1000)
+    retriever = Neo4jTypeRetriever(conn, basic_schema, node_types=["Person"], node_only=True, shard_size=1000)
     retriever.preview_node_count = AsyncMock(return_value=2500)
-    extractors = [e async for e in retriever.fetchNodeExtractors()]
+    extractors = [e async for e in retriever.fetchExtractors()]
     # 2500 / 1000 = 3 shards
     assert_that(extractors, has_length(3))
     for e in extractors:
@@ -411,23 +411,23 @@ async def test_fetch_node_extractors_with_sharding(mocker, basic_schema):
 
 
 @pytest.mark.asyncio
-async def test_fetch_relationship_extractors_no_sharding(mocker, basic_schema):
+async def test_fetch_extractors_adjacency_no_sharding(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema, relationship_types=["BEST_FRIEND_OF"])
-    extractors = [e async for e in retriever.fetchRelationshipExtractors()]
+    extractors = [e async for e in retriever.fetchExtractors()]
     # BEST_FRIEND_OF has one adjacency (Person->Person)
     assert_that(extractors, has_length(1))
     assert isinstance(extractors[0], MappingExtractor)
 
 
 @pytest.mark.asyncio
-async def test_fetch_relationship_extractors_with_sharding(mocker, basic_schema):
+async def test_fetch_extractors_adjacency_with_sharding(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(
         conn, basic_schema, relationship_types=["BEST_FRIEND_OF"], shard_size=500
     )
     retriever.preview_relationship_count = AsyncMock(return_value=1000)
-    extractors = [e async for e in retriever.fetchRelationshipExtractors()]
+    extractors = [e async for e in retriever.fetchExtractors()]
     # 1000 / 500 = 2 shards, 1 adjacency
     assert_that(extractors, has_length(2))
     for e in extractors:
@@ -435,18 +435,8 @@ async def test_fetch_relationship_extractors_with_sharding(mocker, basic_schema)
 
 
 @pytest.mark.asyncio
-async def test_fetch_relationship_extractors_skips_unknown_rel_type(mocker, basic_schema):
+async def test_fetch_extractors_skips_unknown_rel_type(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema, relationship_types=["UNKNOWN_REL"])
-    extractors = [e async for e in retriever.fetchRelationshipExtractors()]
-    assert extractors == []
-
-
-@pytest.mark.asyncio
-async def test_fetch_relationship_extractors_empty_when_node_only(mocker, basic_schema):
-    conn = mocker.Mock()
-    retriever = Neo4jTypeRetriever(
-        conn, basic_schema, relationship_types=["BEST_FRIEND_OF"], node_only=True
-    )
-    extractors = [e async for e in retriever.fetchRelationshipExtractors()]
+    extractors = [e async for e in retriever.fetchExtractors()]
     assert extractors == []

@@ -223,16 +223,10 @@ class Neo4jTypeRetriever(TypeRetriever):
         sample_ratio: int | None = None,
         latest_hours: int | None = None,
         node_only: bool = False,
-        concurrency_limit: int = 1,
-        orchestrator_queue_size: int = 0,
         shard_size: int | None = None,
         max_shards_per_type: int = 10000,
     ) -> None:
-        super().__init__(
-            schema=schema,
-            concurrency_limit=concurrency_limit,
-            orchestrator_queue_size=orchestrator_queue_size,
-        )
+        super().__init__(schema=schema)
         self.database_connection = database_connection
         self.limit = limit
         self.node_types = node_types if node_types is not None else [n.name for n in schema.nodes]
@@ -250,15 +244,13 @@ class Neo4jTypeRetriever(TypeRetriever):
             self.nodeExtractorStrategy = SequentialNodeExtractors(self)
             self.relExtractorStrategy = SimpleRelExtractors(self)
 
-    async def fetchNodeExtractors(self) -> AsyncGenerator[Extractor, None]:
-        async for extractor in self.nodeExtractorStrategy.extractors():
-            yield extractor
-
-    async def fetchRelationshipExtractors(self) -> AsyncGenerator[Extractor, None]:
+    async def fetchExtractors(self) -> AsyncGenerator[Extractor, None]:
         if self.node_only:
-            return
-        async for extractor in self.relExtractorStrategy.extractors():
-            yield extractor
+            async for extractor in self.nodeExtractorStrategy.extractors():
+                yield extractor
+        else:
+            async for extractor in self.relExtractorStrategy.extractors():
+                yield extractor
 
     # -- Mapping helpers --------------------------------------------------------
 
