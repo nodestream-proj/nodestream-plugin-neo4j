@@ -22,9 +22,9 @@ from nodestream_plugin_neo4j.extractor import Neo4jRecordWrapper
 from nodestream_plugin_neo4j.neo4j_database import Neo4jDatabaseConnection
 from nodestream_plugin_neo4j.type_retriever import (
     LAST_INGESTED_AT_PROPERTY,
-    MappingExtractor,
+    Neo4jMappingExtractor,
+    Neo4jShardExtractor,
     Neo4jTypeRetriever,
-    ShardExtractor,
 )
 
 
@@ -172,14 +172,14 @@ def test_sample_ratio_of_one_is_ignored(mocker):
 
 def test_build_node_extractor_query(subject):
     extractor = subject.buildNodeExtractor("Person")
-    assert isinstance(extractor, MappingExtractor)
+    assert isinstance(extractor, Neo4jMappingExtractor)
     assert "MATCH (n:Person)" in extractor.inner.query
     assert "SKIP $offset LIMIT $limit" in extractor.inner.query
 
 
 def test_build_node_extractor_with_filters(filtered_subject):
     extractor = filtered_subject.buildNodeExtractor("Person")
-    assert isinstance(extractor, MappingExtractor)
+    assert isinstance(extractor, Neo4jMappingExtractor)
     assert "WHERE" in extractor.inner.query
     assert_that(extractor.inner.limit, equal_to(500))
     assert "cutoff" in extractor.inner.parameters
@@ -187,14 +187,14 @@ def test_build_node_extractor_with_filters(filtered_subject):
 
 def test_build_rel_extractor_query(subject):
     extractor = subject.buildRelExtractor("Person", "Company", "KNOWS")
-    assert isinstance(extractor, MappingExtractor)
+    assert isinstance(extractor, Neo4jMappingExtractor)
     assert "MATCH (a:Person)-[r:KNOWS]->(b:Company)" in extractor.inner.query
     assert "SKIP $offset LIMIT $limit" in extractor.inner.query
 
 
 def test_build_rel_extractor_with_filters(filtered_subject):
     extractor = filtered_subject.buildRelExtractor("Person", "Company", "KNOWS")
-    assert isinstance(extractor, MappingExtractor)
+    assert isinstance(extractor, Neo4jMappingExtractor)
     assert "WHERE" in extractor.inner.query
     assert_that(extractor.inner.limit, equal_to(500))
     assert "cutoff" in extractor.inner.parameters
@@ -202,7 +202,7 @@ def test_build_rel_extractor_with_filters(filtered_subject):
 
 def test_build_node_shard_extractor_with_key_field(subject):
     extractor = subject.buildNodeShardExtractor("Person", "name", 0, 1000)
-    assert isinstance(extractor, ShardExtractor)
+    assert isinstance(extractor, Neo4jShardExtractor)
     assert "ORDER BY n.`name`" in extractor.statement
     assert extractor.params["shard_offset"] == 0
     assert extractor.params["shard_limit"] == 1000
@@ -210,7 +210,7 @@ def test_build_node_shard_extractor_with_key_field(subject):
 
 def test_build_node_shard_extractor_without_key_field(subject):
     extractor = subject.buildNodeShardExtractor("Person", None, 500, 500)
-    assert isinstance(extractor, ShardExtractor)
+    assert isinstance(extractor, Neo4jShardExtractor)
     assert "ORDER BY elementId(n)" in extractor.statement
     assert extractor.params["shard_offset"] == 500
     assert extractor.params["shard_limit"] == 500
@@ -218,7 +218,7 @@ def test_build_node_shard_extractor_without_key_field(subject):
 
 def test_build_rel_shard_extractor_with_key_field(subject):
     extractor = subject.buildRelShardExtractor("Person", "Person", "BEST_FRIEND_OF", "since", 0, 2000)
-    assert isinstance(extractor, ShardExtractor)
+    assert isinstance(extractor, Neo4jShardExtractor)
     assert "ORDER BY r.`since`" in extractor.statement
     assert extractor.params["shard_offset"] == 0
     assert extractor.params["shard_limit"] == 2000
@@ -226,7 +226,7 @@ def test_build_rel_shard_extractor_with_key_field(subject):
 
 def test_build_rel_shard_extractor_without_key_field(subject):
     extractor = subject.buildRelShardExtractor("Person", "Person", "BEST_FRIEND_OF", None, 100, 900)
-    assert isinstance(extractor, ShardExtractor)
+    assert isinstance(extractor, Neo4jShardExtractor)
     assert "ORDER BY elementId(r)" in extractor.statement
     assert extractor.params["shard_offset"] == 100
     assert extractor.params["shard_limit"] == 900
@@ -395,7 +395,7 @@ async def test_fetch_extractors_node_only_no_sharding(mocker, basic_schema):
     retriever = Neo4jTypeRetriever(conn, basic_schema, node_types=["Person"], node_only=True)
     extractors = [e async for e in retriever.fetchExtractors()]
     assert_that(extractors, has_length(1))
-    assert isinstance(extractors[0], MappingExtractor)
+    assert isinstance(extractors[0], Neo4jMappingExtractor)
 
 
 @pytest.mark.asyncio
@@ -407,7 +407,7 @@ async def test_fetch_extractors_node_only_with_sharding(mocker, basic_schema):
     # 2500 / 1000 = 3 shards
     assert_that(extractors, has_length(3))
     for e in extractors:
-        assert isinstance(e, ShardExtractor)
+        assert isinstance(e, Neo4jShardExtractor)
 
 
 @pytest.mark.asyncio
@@ -417,7 +417,7 @@ async def test_fetch_extractors_adjacency_no_sharding(mocker, basic_schema):
     extractors = [e async for e in retriever.fetchExtractors()]
     # BEST_FRIEND_OF has one adjacency (Person->Person)
     assert_that(extractors, has_length(1))
-    assert isinstance(extractors[0], MappingExtractor)
+    assert isinstance(extractors[0], Neo4jMappingExtractor)
 
 
 @pytest.mark.asyncio
@@ -431,7 +431,7 @@ async def test_fetch_extractors_adjacency_with_sharding(mocker, basic_schema):
     # 1000 / 500 = 2 shards, 1 adjacency
     assert_that(extractors, has_length(2))
     for e in extractors:
-        assert isinstance(e, ShardExtractor)
+        assert isinstance(e, Neo4jShardExtractor)
 
 
 @pytest.mark.asyncio
