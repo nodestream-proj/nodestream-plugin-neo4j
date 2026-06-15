@@ -1,4 +1,5 @@
 from typing import cast as type_cast
+from unittest.mock import AsyncMock
 
 import pytest
 from hamcrest import assert_that, equal_to, has_length
@@ -6,6 +7,7 @@ from neo4j import Record, RoutingControl
 from neo4j.graph import Node as Neo4jNode
 from neo4j.graph import Relationship as Neo4jRelationship
 from nodestream.model import Node, PropertySet, Relationship, RelationshipWithNodes
+from nodestream.pipeline import Extractor
 from nodestream.schema.state import (
     Adjacency,
     AdjacencyCardinality,
@@ -20,7 +22,9 @@ from nodestream_plugin_neo4j.extractor import Neo4jRecordWrapper
 from nodestream_plugin_neo4j.neo4j_database import Neo4jDatabaseConnection
 from nodestream_plugin_neo4j.type_retriever import (
     LAST_INGESTED_AT_PROPERTY,
+    MappingExtractor,
     Neo4jTypeRetriever,
+    ShardExtractor,
 )
 
 
@@ -109,29 +113,6 @@ def test_map_neo4j_relationship_to_nodestream_relationship(subject):
     assert result == Relationship(type="KNOWS", properties=PropertySet({"since": 2019}))
 
 
-# -- Extractor construction (no filters) ------------------------------------
-
-
-def test_get_node_type_extractor(subject):
-    extractor = subject.get_node_type_extractor("Person")
-    assert_that(
-        extractor.query,
-        equal_to("MATCH (n:Person)\nRETURN n SKIP $offset LIMIT $limit\n"),
-    )
-
-
-def test_get_relationships_of_type_between_extractor(subject):
-    extractor = subject.get_relationships_of_type_between_extractor(
-        "Person", "Company", "KNOWS"
-    )
-    assert_that(
-        extractor.query,
-        equal_to(
-            "MATCH (a:Person)-[r:KNOWS]->(b:Company)\nRETURN a, r, b SKIP $offset LIMIT $limit\n"
-        ),
-    )
-
-
 # -- Where-clause / filter tests --------------------------------------------
 
 
@@ -140,7 +121,6 @@ def test_where_clause_empty_when_no_filters(subject):
 
 
 def test_where_clause_with_sample_ratio(sampled_subject):
-    # Sampling is only applied to relationship variables (sample=True).
     assert_that(
         sampled_subject.build_where_clause("r", sample=True),
         equal_to("WHERE toInteger(split(elementId(r), ':')[-1]) % 3 = 0\n"),
@@ -148,7 +128,6 @@ def test_where_clause_with_sample_ratio(sampled_subject):
 
 
 def test_where_clause_sample_not_applied_to_nodes(sampled_subject):
-    # Nodes are never sampled — build_where_clause without sample=True produces no clause.
     assert_that(sampled_subject.build_where_clause("n"), equal_to(""))
 
 
@@ -162,7 +141,6 @@ def test_where_clause_with_latest_hours(mocker):
 
 
 def test_where_clause_with_both_filters(filtered_subject):
-    # When sample=True and latest_hours are both set, both clauses appear.
     assert_that(
         filtered_subject.build_where_clause("r", sample=True),
         equal_to(
@@ -189,23 +167,69 @@ def test_sample_ratio_of_one_is_ignored(mocker):
     assert_that(retriever.build_where_clause("n"), equal_to(""))
 
 
-# -- Extractor construction (with filters) ----------------------------------
+# -- Extractor builder tests -------------------------------------------------
 
 
-def test_get_node_type_extractor_with_filters(filtered_subject):
-    extractor = filtered_subject.get_node_type_extractor("Person")
-    assert "WHERE" in extractor.query
-    assert_that(extractor.limit, equal_to(500))
-    assert "cutoff" in extractor.parameters
+def test_build_node_extractor_query(subject):
+    extractor = subject.buildNodeExtractor("Person")
+    assert isinstance(extractor, MappingExtractor)
+    assert "MATCH (n:Person)" in extractor.inner.query
+    assert "SKIP $offset LIMIT $limit" in extractor.inner.query
 
 
-def test_get_relationships_extractor_with_filters(filtered_subject):
-    extractor = filtered_subject.get_relationships_of_type_between_extractor(
-        "Person", "Company", "KNOWS"
-    )
-    assert "WHERE" in extractor.query
-    assert_that(extractor.limit, equal_to(500))
-    assert "cutoff" in extractor.parameters
+def test_build_node_extractor_with_filters(filtered_subject):
+    extractor = filtered_subject.buildNodeExtractor("Person")
+    assert isinstance(extractor, MappingExtractor)
+    assert "WHERE" in extractor.inner.query
+    assert_that(extractor.inner.limit, equal_to(500))
+    assert "cutoff" in extractor.inner.parameters
+
+
+def test_build_rel_extractor_query(subject):
+    extractor = subject.buildRelExtractor("Person", "Company", "KNOWS")
+    assert isinstance(extractor, MappingExtractor)
+    assert "MATCH (a:Person)-[r:KNOWS]->(b:Company)" in extractor.inner.query
+    assert "SKIP $offset LIMIT $limit" in extractor.inner.query
+
+
+def test_build_rel_extractor_with_filters(filtered_subject):
+    extractor = filtered_subject.buildRelExtractor("Person", "Company", "KNOWS")
+    assert isinstance(extractor, MappingExtractor)
+    assert "WHERE" in extractor.inner.query
+    assert_that(extractor.inner.limit, equal_to(500))
+    assert "cutoff" in extractor.inner.parameters
+
+
+def test_build_node_shard_extractor_with_key_field(subject):
+    extractor = subject.buildNodeShardExtractor("Person", "name", 0, 1000)
+    assert isinstance(extractor, ShardExtractor)
+    assert "ORDER BY n.`name`" in extractor.statement
+    assert extractor.params["shard_offset"] == 0
+    assert extractor.params["shard_limit"] == 1000
+
+
+def test_build_node_shard_extractor_without_key_field(subject):
+    extractor = subject.buildNodeShardExtractor("Person", None, 500, 500)
+    assert isinstance(extractor, ShardExtractor)
+    assert "ORDER BY elementId(n)" in extractor.statement
+    assert extractor.params["shard_offset"] == 500
+    assert extractor.params["shard_limit"] == 500
+
+
+def test_build_rel_shard_extractor_with_key_field(subject):
+    extractor = subject.buildRelShardExtractor("Person", "Person", "BEST_FRIEND_OF", "since", 0, 2000)
+    assert isinstance(extractor, ShardExtractor)
+    assert "ORDER BY r.`since`" in extractor.statement
+    assert extractor.params["shard_offset"] == 0
+    assert extractor.params["shard_limit"] == 2000
+
+
+def test_build_rel_shard_extractor_without_key_field(subject):
+    extractor = subject.buildRelShardExtractor("Person", "Person", "BEST_FRIEND_OF", None, 100, 900)
+    assert isinstance(extractor, ShardExtractor)
+    assert "ORDER BY elementId(r)" in extractor.statement
+    assert extractor.params["shard_offset"] == 100
+    assert extractor.params["shard_limit"] == 900
 
 
 # -- Preview count tests ----------------------------------------------------
@@ -243,7 +267,6 @@ async def test_preview_relationship_count_empty_result(subject):
 
 @pytest.mark.asyncio
 async def test_preview_node_count_with_filters(filtered_subject):
-    """Count query should include the WHERE clause when filters are active."""
     filtered_subject.database_connection.execute.return_value = [{"count": 10}]
     count = await filtered_subject.preview_node_count("Person")
     assert_that(count, equal_to(10))
@@ -252,76 +275,7 @@ async def test_preview_node_count_with_filters(filtered_subject):
     assert "cutoff" in query_arg.parameters
 
 
-# -- get_nodes_of_type / get_relationships_of_type_between ------------------
-
-
-@pytest.mark.asyncio
-async def test_get_nodes_of_type(subject, mocker):
-    subject.map_neo4j_node_to_nodestream_node = mocker.Mock()
-    subject.get_node_type_extractor = mocker.Mock()
-    extractor = subject.get_node_type_extractor.return_value
-    n1 = FakeNeo4jNode(("Person",), {"id": 1, "name": "p1"})
-    n2 = FakeNeo4jNode(("Person", "Employee"), {"id": 2, "name": "p2"})
-    extractor.extract_records.return_value = async_generator(
-        Neo4jRecordWrapper(type_cast(Record, FakeRecord({"n": n1}))),
-        Neo4jRecordWrapper(type_cast(Record, FakeRecord({"n": n2}))),
-    )
-    results = [r async for r in subject.get_nodes_of_type("Person")]
-    assert_that(results, has_length(2))
-    subject.map_neo4j_node_to_nodestream_node.assert_any_call(
-        n1, node_type="Person", schema=None
-    )
-    subject.map_neo4j_node_to_nodestream_node.assert_any_call(
-        n2, node_type="Person", schema=None
-    )
-
-
-@pytest.mark.asyncio
-async def test_get_relationships_of_type_between(subject, mocker):
-    subject.map_neo4j_node_to_nodestream_node = mocker.Mock()
-    subject.map_neo4j_relationship_to_nodestream_relationship = mocker.Mock()
-    subject.get_relationships_of_type_between_extractor = mocker.Mock()
-    extractor = subject.get_relationships_of_type_between_extractor.return_value
-    a1 = FakeNeo4jNode(("Person",), {"id": 1})
-    b1 = FakeNeo4jNode(("Company",), {"id": 10})
-    r1 = FakeNeo4jRel("KNOWS", {"since": 2019})
-    a2 = FakeNeo4jNode(("Person",), {"id": 2})
-    b2 = FakeNeo4jNode(("Company",), {"id": 11})
-    r2 = FakeNeo4jRel("KNOWS", {"since": 2020})
-    extractor.extract_records.return_value = async_generator(
-        Neo4jRecordWrapper(type_cast(Record, FakeRecord({"a": a1, "b": b1, "r": r1}))),
-        Neo4jRecordWrapper(type_cast(Record, FakeRecord({"a": a2, "b": b2, "r": r2}))),
-    )
-    results = [
-        r
-        async for r in subject.get_relationships_of_type_between(
-            "Person", "Company", "KNOWS"
-        )
-    ]
-    assert_that(results, has_length(2))
-    subject.map_neo4j_node_to_nodestream_node.assert_any_call(
-        a1, node_type="Person", schema=None
-    )
-    subject.map_neo4j_node_to_nodestream_node.assert_any_call(
-        b1, node_type="Company", schema=None
-    )
-    subject.map_neo4j_relationship_to_nodestream_relationship.assert_any_call(
-        r1, relationship_type="KNOWS"
-    )
-
-
-# -- compute_shards ----------------------------------------------------------
-
-
-def test_compute_shards_zero_count_returns_empty(subject):
-    assert subject.compute_shards(0, 1000) == []
-
-
-def test_compute_shards_negative_shard_size_returns_empty(subject):
-    assert subject.compute_shards(5000, 0) == []
-
-
-# -- Schema fixtures ---------------------------------------------------------
+# -- map_neo4j_node_to_nodestream_node with schema (key extraction) ----------
 
 
 @pytest.fixture
@@ -356,24 +310,17 @@ def basic_schema():
     return schema
 
 
-# -- map_neo4j_node_to_nodestream_node with schema (key extraction) ----------
-
-
-def test_map_neo4j_node_to_nodestream_node_with_schema_extracts_keys(
-    subject, basic_schema
-):
+def test_map_neo4j_node_to_nodestream_node_with_schema_extracts_keys(subject, basic_schema):
     neo_node = FakeNeo4jNode(("Person",), {"name": "Alice", "age": 30})
     result = subject.map_neo4j_node_to_nodestream_node(
         type_cast(Neo4jNode, neo_node), node_type="Person", schema=basic_schema
     )
-    # "name" is the key field — it should be in key_values, not properties
     assert "name" in result.key_values
     assert result.key_values["name"] == "Alice"
     assert "name" not in result.properties
 
 
 def test_map_neo4j_node_to_nodestream_node_schema_unknown_type(subject, basic_schema):
-    """When node_type has no entry in schema, behaves like schema=None."""
     neo_node = FakeNeo4jNode(("Unknown",), {"x": 1})
     result = subject.map_neo4j_node_to_nodestream_node(
         type_cast(Neo4jNode, neo_node), node_type="Unknown", schema=basic_schema
@@ -383,337 +330,123 @@ def test_map_neo4j_node_to_nodestream_node_schema_unknown_type(subject, basic_sc
     assert len(result.key_values) == 0
 
 
-# -- execute_node_shard_query ------------------------------------------------
+# -- compute_shards ----------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_execute_node_shard_query_with_key_field(subject, mocker):
-    subject.database_connection.execute = mocker.AsyncMock(return_value=[])
-    await subject.execute_node_shard_query(
-        "Person", "name", shard_offset=0, shard_limit=1000
-    )
-    call_args = subject.database_connection.execute.call_args
-    query = call_args[0][0]
-    assert "ORDER BY n.`name`" in query.query_statement
-    assert query.parameters["shard_offset"] == 0
-    assert query.parameters["shard_limit"] == 1000
+def test_compute_shards_zero_count_returns_empty(subject):
+    assert subject.compute_shards(0, 1000) == []
 
 
-@pytest.mark.asyncio
-async def test_execute_node_shard_query_without_key_field(subject, mocker):
-    subject.database_connection.execute = mocker.AsyncMock(return_value=[])
-    await subject.execute_node_shard_query(
-        "Person", None, shard_offset=500, shard_limit=500
-    )
-    call_args = subject.database_connection.execute.call_args
-    query = call_args[0][0]
-    assert "ORDER BY elementId(n)" in query.query_statement
-    assert query.parameters["shard_offset"] == 500
-    assert query.parameters["shard_limit"] == 500
+def test_compute_shards_negative_shard_size_returns_empty(subject):
+    assert subject.compute_shards(5000, 0) == []
 
 
-# -- execute_relationship_shard_query ----------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_execute_relationship_shard_query_with_key_field(subject, mocker):
-    subject.database_connection.execute = mocker.AsyncMock(return_value=[])
-    await subject.execute_relationship_shard_query(
-        "Person", "Person", "BEST_FRIEND_OF", "since", shard_offset=0, shard_limit=2000
-    )
-    call_args = subject.database_connection.execute.call_args
-    query = call_args[0][0]
-    assert "ORDER BY r.`since`" in query.query_statement
-    assert query.parameters["shard_offset"] == 0
-    assert query.parameters["shard_limit"] == 2000
-
-
-@pytest.mark.asyncio
-async def test_execute_relationship_shard_query_without_key_field(subject, mocker):
-    subject.database_connection.execute = mocker.AsyncMock(return_value=[])
-    await subject.execute_relationship_shard_query(
-        "Person", "Person", "BEST_FRIEND_OF", None, shard_offset=100, shard_limit=900
-    )
-    call_args = subject.database_connection.execute.call_args
-    query = call_args[0][0]
-    assert "ORDER BY elementId(r)" in query.query_statement
-    assert query.parameters["shard_offset"] == 100
-    assert query.parameters["shard_limit"] == 900
-
-
-# -- get_nodes_of_type_shard -------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_get_nodes_of_type_shard(subject, mocker):
-    subject.map_neo4j_node_to_nodestream_node = mocker.Mock(
-        return_value=Node(type="Person", properties=PropertySet({"name": "p1"}))
-    )
-    n1 = FakeNeo4jNode(("Person",), {"name": "p1"})
-    subject.execute_node_shard_query = mocker.AsyncMock(
-        return_value=[FakeRecord({"n": n1})]
-    )
-    results = [
-        r async for r in subject.get_nodes_of_type_shard("Person", "name", 0, 1000)
-    ]
-    assert_that(results, has_length(1))
-    subject.execute_node_shard_query.assert_called_once_with(
-        "Person", "name", 0, 1000, cutoff=None
-    )
-
-
-# -- get_relationships_of_type_between_shard ---------------------------------
-
-
-@pytest.mark.asyncio
-async def test_get_relationships_of_type_between_shard(subject, mocker):
-    subject.map_neo4j_node_to_nodestream_node = mocker.Mock(
-        side_effect=lambda n, node_type, schema: Node(
-            type=node_type, properties=PropertySet(dict(n))
-        )
-    )
-    subject.map_neo4j_relationship_to_nodestream_relationship = mocker.Mock(
-        return_value=Relationship(type="BEST_FRIEND_OF", properties=PropertySet({}))
-    )
-    a1 = FakeNeo4jNode(("Person",), {"id": 1})
-    b1 = FakeNeo4jNode(("Person",), {"id": 2})
-    r1 = FakeNeo4jRel("BEST_FRIEND_OF", {})
-    subject.execute_relationship_shard_query = mocker.AsyncMock(
-        return_value=[FakeRecord({"a": a1, "b": b1, "r": r1})]
-    )
-    results = [
-        r
-        async for r in subject.get_relationships_of_type_between_shard(
-            "Person", "Person", "BEST_FRIEND_OF", "since", 0, 1000
-        )
-    ]
-    assert_that(results, has_length(1))
-    assert isinstance(results[0], RelationshipWithNodes)
-    subject.execute_relationship_shard_query.assert_called_once_with(
-        "Person", "Person", "BEST_FRIEND_OF", "since", 0, 1000, cutoff=None
-    )
-
-
-# -- key_field_for_node_type -------------------------------------------------
+# -- key_field helpers -------------------------------------------------------
 
 
 def test_key_field_for_node_type_with_latest_hours(basic_schema):
     import unittest.mock as mock
-
     conn = mock.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema, latest_hours=24)
-    assert (
-        retriever.key_field_for_node_type("Person", basic_schema)
-        == LAST_INGESTED_AT_PROPERTY
-    )
+    assert retriever.key_field_for_node_type("Person", basic_schema) == LAST_INGESTED_AT_PROPERTY
 
 
 def test_key_field_for_node_type_from_schema_keys(basic_schema):
     import unittest.mock as mock
-
     conn = mock.Mock()
-    retriever = Neo4jTypeRetriever(conn, basic_schema)  # no latest_hours
-    key = retriever.key_field_for_node_type("Person", basic_schema)
-    # Person has "name" as key field
-    assert key == "name"
+    retriever = Neo4jTypeRetriever(conn, basic_schema)
+    assert retriever.key_field_for_node_type("Person", basic_schema) == "name"
 
 
 def test_key_field_for_node_type_no_schema_keys(basic_schema):
     import unittest.mock as mock
-
     conn = mock.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema)
-    # Organization has no key fields in our basic_schema fixture
-    key = retriever.key_field_for_node_type("Organization", basic_schema)
-    assert key is None
+    assert retriever.key_field_for_node_type("Organization", basic_schema) is None
 
 
 def test_key_field_for_node_type_unknown_type(basic_schema):
     import unittest.mock as mock
-
     conn = mock.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema)
     assert retriever.key_field_for_node_type("Ghost", basic_schema) is None
 
 
-# -- key_field_for_relationship_type -----------------------------------------
-
-
 def test_key_field_for_relationship_type_with_latest_hours(basic_schema):
     import unittest.mock as mock
-
     conn = mock.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema, latest_hours=6)
-    assert (
-        retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema)
-        == LAST_INGESTED_AT_PROPERTY
-    )
+    assert retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema) == LAST_INGESTED_AT_PROPERTY
 
 
 def test_key_field_for_relationship_type_no_latest_hours(basic_schema):
     import unittest.mock as mock
-
     conn = mock.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema)
-    assert (
-        retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema)
-        is None
-    )
+    assert retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema) is None
 
 
-# -- planSpecs (relationship fetch strategies) ------------------------------
+# -- fetchNodeExtractors / fetchRelationshipExtractors ----------------------
 
 
 @pytest.mark.asyncio
-async def test_simple_rel_fetch_plan_specs_no_sharding(mocker, basic_schema):
-    conn = mocker.Mock()
-    retriever = Neo4jTypeRetriever(conn, basic_schema, relationship_types=["BEST_FRIEND_OF"])
-    fetchSpecs = await retriever.rel_fetch_strategy.planSpecs()
-    # BEST_FRIEND_OF has one adjacency (Person->Person), no sharding => one spec
-    assert len(fetchSpecs) == 1
-    relationshipType, adjacency, cutoff, shardOffset, shardLimit, keyField = fetchSpecs[
-        0
-    ]
-    assert relationshipType == "BEST_FRIEND_OF"
-    assert adjacency.from_node_type == "Person"
-    assert adjacency.to_node_type == "Person"
-    assert shardOffset is None
-    assert shardLimit is None
-    assert keyField is None
-
-
-@pytest.mark.asyncio
-async def test_sharded_rel_fetch_plan_specs(mocker, basic_schema):
-    conn = mocker.Mock()
-    retriever = Neo4jTypeRetriever(
-        conn, basic_schema, relationship_types=["BEST_FRIEND_OF"], shard_size=1000
-    )
-    retriever.preview_relationship_count = mocker.AsyncMock(return_value=2500)
-    fetchSpecs = await retriever.rel_fetch_strategy.planSpecs()
-    # 2500 / 1000 = 3 shards, 1 adjacency => 3 specs
-    assert len(fetchSpecs) == 3
-    offsets = [s[3] for s in fetchSpecs]
-    assert offsets == [0, 1000, 2000]
-    limits = [s[4] for s in fetchSpecs]
-    assert limits == [1000, 1000, 500]
-
-
-@pytest.mark.asyncio
-async def test_simple_rel_fetch_plan_specs_skips_type_with_no_adjacencies(
-    mocker, basic_schema
-):
-    conn = mocker.Mock()
-    retriever = Neo4jTypeRetriever(conn, basic_schema, relationship_types=["UNKNOWN_REL"])
-    fetchSpecs = await retriever.rel_fetch_strategy.planSpecs()
-    assert fetchSpecs == []
-
-
-# -- fetchNodes -------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_fetch_nodes_no_sharding(mocker, basic_schema):
+async def test_fetch_node_extractors_no_sharding(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema, node_types=["Person"])
-    node = Node(type="Person", properties=PropertySet({"name": "Alice"}))
-    retriever.get_nodes_of_type = mocker.Mock(return_value=async_generator(node))
-    results = [r async for r in retriever.fetchNodes()]
-    assert results == [node]
-    retriever.get_nodes_of_type.assert_called_once()
+    extractors = [e async for e in retriever.fetchNodeExtractors()]
+    assert_that(extractors, has_length(1))
+    assert isinstance(extractors[0], MappingExtractor)
 
 
 @pytest.mark.asyncio
-async def test_fetch_nodes_with_sharding(mocker, basic_schema):
+async def test_fetch_node_extractors_with_sharding(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema, node_types=["Person"], shard_size=1000)
-    retriever.preview_node_count = mocker.AsyncMock(return_value=2000)
-    node1 = Node(type="Person", properties=PropertySet({"name": "Alice"}))
-    node2 = Node(type="Person", properties=PropertySet({"name": "Bob"}))
-    retriever.get_nodes_of_type_shard = mocker.Mock(
-        side_effect=[async_generator(node1), async_generator(node2)]
-    )
-    results = [r async for r in retriever.fetchNodes()]
-    assert results == [node1, node2]
-    # 2000 / 1000 = 2 shards
-    assert retriever.get_nodes_of_type_shard.call_count == 2
+    retriever.preview_node_count = AsyncMock(return_value=2500)
+    extractors = [e async for e in retriever.fetchNodeExtractors()]
+    # 2500 / 1000 = 3 shards
+    assert_that(extractors, has_length(3))
+    for e in extractors:
+        assert isinstance(e, ShardExtractor)
 
 
 @pytest.mark.asyncio
-async def test_fetch_nodes_concurrent_without_sharding(mocker, basic_schema):
-    """concurrency_limit > 1 without shard_size runs one task per node type."""
+async def test_fetch_relationship_extractors_no_sharding(mocker, basic_schema):
+    conn = mocker.Mock()
+    retriever = Neo4jTypeRetriever(conn, basic_schema, relationship_types=["BEST_FRIEND_OF"])
+    extractors = [e async for e in retriever.fetchRelationshipExtractors()]
+    # BEST_FRIEND_OF has one adjacency (Person->Person)
+    assert_that(extractors, has_length(1))
+    assert isinstance(extractors[0], MappingExtractor)
+
+
+@pytest.mark.asyncio
+async def test_fetch_relationship_extractors_with_sharding(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(
-        conn, basic_schema, node_types=["Person", "Organization"], concurrency_limit=2
+        conn, basic_schema, relationship_types=["BEST_FRIEND_OF"], shard_size=500
     )
-    node1 = Node(type="Person", properties=PropertySet({"name": "Alice"}))
-    node2 = Node(type="Organization", properties=PropertySet({"name": "Acme"}))
-    retriever.get_nodes_of_type = mocker.Mock(
-        side_effect=lambda node_type, schema, cutoff: (
-            async_generator(node1) if node_type == "Person" else async_generator(node2)
-        )
-    )
-    results = [r async for r in retriever.fetchNodes()]
-    assert len(results) == 2
-    assert node1 in results
-    assert node2 in results
-    assert retriever.get_nodes_of_type.call_count == 2
-
-
-# -- fetchRelationships -----------------------------------------------------
+    retriever.preview_relationship_count = AsyncMock(return_value=1000)
+    extractors = [e async for e in retriever.fetchRelationshipExtractors()]
+    # 1000 / 500 = 2 shards, 1 adjacency
+    assert_that(extractors, has_length(2))
+    for e in extractors:
+        assert isinstance(e, ShardExtractor)
 
 
 @pytest.mark.asyncio
-async def test_fetch_relationships_empty_when_no_specs(mocker, basic_schema):
+async def test_fetch_relationship_extractors_skips_unknown_rel_type(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema, relationship_types=["UNKNOWN_REL"])
-    results = [r async for r in retriever.fetchRelationships()]
-    assert results == []
+    extractors = [e async for e in retriever.fetchRelationshipExtractors()]
+    assert extractors == []
 
 
 @pytest.mark.asyncio
-async def test_fetch_relationships_yields_items(mocker, basic_schema):
+async def test_fetch_relationship_extractors_empty_when_node_only(mocker, basic_schema):
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(
-        conn, basic_schema, relationship_types=["BEST_FRIEND_OF"], concurrency_limit=2
+        conn, basic_schema, relationship_types=["BEST_FRIEND_OF"], node_only=True
     )
-    rwn = RelationshipWithNodes(
-        from_node=Node(type="Person", properties=PropertySet({})),
-        to_node=Node(type="Person", properties=PropertySet({})),
-        relationship=Relationship(type="BEST_FRIEND_OF", properties=PropertySet({})),
-    )
-    retriever.get_relationships_of_type_between = mocker.Mock(
-        return_value=async_generator(rwn)
-    )
-    retriever.preview_relationship_count = mocker.AsyncMock(return_value=1)
-    results = [r async for r in retriever.fetchRelationships()]
-    assert len(results) == 1
-    assert results[0] == rwn
-
-
-@pytest.mark.asyncio
-async def test_fetch_relationships_with_sharding(mocker, basic_schema):
-    conn = mocker.Mock()
-    retriever = Neo4jTypeRetriever(
-        conn,
-        basic_schema,
-        relationship_types=["BEST_FRIEND_OF"],
-        shard_size=500,
-        concurrency_limit=2,
-    )
-    retriever.preview_relationship_count = mocker.AsyncMock(return_value=1000)
-    rwn1 = RelationshipWithNodes(
-        from_node=Node(type="Person", properties=PropertySet({})),
-        to_node=Node(type="Person", properties=PropertySet({})),
-        relationship=Relationship(type="BEST_FRIEND_OF", properties=PropertySet({})),
-    )
-    rwn2 = RelationshipWithNodes(
-        from_node=Node(type="Person", properties=PropertySet({})),
-        to_node=Node(type="Person", properties=PropertySet({})),
-        relationship=Relationship(type="BEST_FRIEND_OF", properties=PropertySet({})),
-    )
-    retriever.get_relationships_of_type_between_shard = mocker.Mock(
-        side_effect=[async_generator(rwn1), async_generator(rwn2)]
-    )
-    results = [r async for r in retriever.fetchRelationships()]
-    assert len(results) == 2
-    assert retriever.get_relationships_of_type_between_shard.call_count == 2
+    extractors = [e async for e in retriever.fetchRelationshipExtractors()]
+    assert extractors == []
