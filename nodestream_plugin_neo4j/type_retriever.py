@@ -324,8 +324,8 @@ class Neo4jTypeRetriever(TypeRetriever):
         )
         self.database_connection = database_connection
         self.limit = limit
-        self.node_types = node_types or []
-        self.relationship_types = relationship_types or []
+        self.node_types = node_types if node_types is not None else [n.name for n in schema.nodes]
+        self.relationship_types = relationship_types if relationship_types is not None else [r.name for r in schema.relationships]
         self.sample_ratio = sample_ratio if sample_ratio and sample_ratio > 1 else None
         self.latest_hours = latest_hours
         self.shard_size = shard_size

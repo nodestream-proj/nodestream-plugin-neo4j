@@ -76,8 +76,6 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
     def make_type_retriever(self, **kwargs) -> TypeRetriever:
         schema = kwargs.pop("schema")
         limit: int = kwargs.pop("limit", 1000)
-        node_types: list = kwargs.pop("node_types", [])
-        relationship_types: list = kwargs.pop("relationship_types", [])
         sample_ratio: int | None = kwargs.pop("sample_ratio", None)
         latest_hours: int | None = kwargs.pop("latest_hours", None)
         node_only: bool = kwargs.pop("node_only", False)
@@ -88,8 +86,6 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
             self.database_connection,
             schema,
             limit,
-            node_types=node_types,
-            relationship_types=relationship_types,
             sample_ratio=sample_ratio,
             latest_hours=latest_hours,
             node_only=node_only,

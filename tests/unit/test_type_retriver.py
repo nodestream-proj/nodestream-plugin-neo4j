@@ -97,7 +97,7 @@ def test_map_neo4j_node_to_nodestream_node(subject):
     assert result == Node(
         type="Person",
         properties=PropertySet({"name": "John", "id": 123}),
-        additional_types=["Employee"],
+        additional_types=("Employee",),
     )
 
 
