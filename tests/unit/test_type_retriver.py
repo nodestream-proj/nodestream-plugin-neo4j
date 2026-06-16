@@ -362,14 +362,14 @@ def test_key_field_for_node_type_no_schema_keys(basic_schema):
     import unittest.mock as mock
     conn = mock.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema)
-    assert retriever.key_field_for_node_type("Organization", basic_schema) is None
+    assert retriever.key_field_for_node_type("Organization", basic_schema) == "last_ingested_at"
 
 
 def test_key_field_for_node_type_unknown_type(basic_schema):
     import unittest.mock as mock
     conn = mock.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema)
-    assert retriever.key_field_for_node_type("Ghost", basic_schema) is None
+    assert retriever.key_field_for_node_type("Ghost", basic_schema) == "last_ingested_at"
 
 
 def test_key_field_for_relationship_type_with_latest_hours(basic_schema):
@@ -383,7 +383,7 @@ def test_key_field_for_relationship_type_no_latest_hours(basic_schema):
     import unittest.mock as mock
     conn = mock.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema)
-    assert retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema) is None
+    assert retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema) == LAST_INGESTED_AT_PROPERTY
 
 
 # -- fetchExtractors --------------------------------------------------------
