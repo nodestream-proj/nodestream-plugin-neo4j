@@ -176,8 +176,14 @@ class Neo4jTypeRetriever(TypeRetriever):
         super().__init__(schema=schema)
         self.database_connection = database_connection
         self.limit = limit
-        self.node_types = node_types if node_types is not None else [n.name for n in schema.nodes]
-        self.relationship_types = relationship_types if relationship_types is not None else [r.name for r in schema.relationships]
+        self.node_types = (
+            node_types if node_types is not None else [n.name for n in schema.nodes]
+        )
+        self.relationship_types = (
+            relationship_types
+            if relationship_types is not None
+            else [r.name for r in schema.relationships]
+        )
         self.sample_ratio = sample_ratio if sample_ratio and sample_ratio > 1 else None
         self.latest_hours = latest_hours
         self.node_only = node_only
@@ -240,7 +246,10 @@ class Neo4jTypeRetriever(TypeRetriever):
 
         if self.shard_size is not None:
             counts = await asyncio.gather(
-                *(self.preview_relationship_count(rt, cutoff=cutoff) for rt, _ in relTypeAdj)
+                *(
+                    self.preview_relationship_count(rt, cutoff=cutoff)
+                    for rt, _ in relTypeAdj
+                )
             )
             extractorsByType = [
                 [
@@ -311,7 +320,10 @@ class Neo4jTypeRetriever(TypeRetriever):
     # -- Extractor builders -----------------------------------------------------
 
     def buildNodeExtractor(
-        self, node_type: str, schema: Schema | None = None, cutoff: datetime | None = None
+        self,
+        node_type: str,
+        schema: Schema | None = None,
+        cutoff: datetime | None = None,
     ) -> Extractor:
         where = self.build_where_clause("n")
         inner = Neo4jExtractor(
@@ -500,7 +512,10 @@ class Neo4jTypeRetriever(TypeRetriever):
             zip(
                 self.node_types,
                 await asyncio.gather(
-                    *(self.preview_node_count(t, cutoff=cutoff) for t in self.node_types)
+                    *(
+                        self.preview_node_count(t, cutoff=cutoff)
+                        for t in self.node_types
+                    )
                 ),
             )
         )
@@ -510,7 +525,10 @@ class Neo4jTypeRetriever(TypeRetriever):
                 zip(
                     self.relationship_types,
                     await asyncio.gather(
-                        *(self.preview_relationship_count(t, cutoff=cutoff) for t in self.relationship_types)
+                        *(
+                            self.preview_relationship_count(t, cutoff=cutoff)
+                            for t in self.relationship_types
+                        )
                     ),
                 )
             )

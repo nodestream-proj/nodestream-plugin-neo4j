@@ -126,7 +126,6 @@ async def test_auth_rate_limit_error_treated_as_retryable(mocker):
     assert good_driver.execute_query.call_count == 1
 
 
-
 # ---------------------------------------------------------------------------
 # Test 2 — concurrent callers do not re-use the bad driver during rotation
 # ---------------------------------------------------------------------------
