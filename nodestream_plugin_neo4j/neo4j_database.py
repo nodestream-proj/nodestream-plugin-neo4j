@@ -18,6 +18,7 @@ from neo4j.auth_management import AsyncAuthManagers
 from neo4j.exceptions import (
     AuthError,
     ClientError,
+    IncompleteCommit,
     ServiceUnavailable,
     SessionExpired,
     TransientError,
@@ -38,6 +39,7 @@ RETRYABLE_EXCEPTIONS = tuple(
         TransientError,
         ServiceUnavailable,
         SessionExpired,
+        IncompleteCommit,
         AuthError,
         ConnectionAcquisitionTimeoutError,
     )
@@ -61,6 +63,10 @@ def is_retryable(e: Exception) -> bool:
     if isinstance(
         e, AttributeError
     ) and "'NoneType' object has no attribute 'complete'" in str(e):
+        return True
+    # uvloop SSL handshake reset: connection dropped by remote during TLS negotiation.
+    # Surfaces as bare ConnectionResetError from uvloop/sslproto.pyx, not a neo4j exception.
+    if isinstance(e, ConnectionResetError):
         return True
     return False
 

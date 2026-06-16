@@ -350,6 +350,20 @@ def test_is_retryable_attribute_error_none_complete():
     assert is_retryable(err)
 
 
+def test_is_retryable_connection_reset_error():
+    from nodestream_plugin_neo4j.neo4j_database import is_retryable
+
+    assert is_retryable(ConnectionResetError("Connection reset by peer"))
+
+
+def test_is_retryable_incomplete_commit():
+    from neo4j.exceptions import IncompleteCommit
+
+    from nodestream_plugin_neo4j.neo4j_database import is_retryable
+
+    assert is_retryable(IncompleteCommit("Failed to read from defunct connection"))
+
+
 def test_is_not_retryable_plain_value_error():
     from nodestream_plugin_neo4j.neo4j_database import is_retryable
 
