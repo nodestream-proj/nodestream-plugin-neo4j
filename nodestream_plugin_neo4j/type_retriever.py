@@ -54,15 +54,6 @@ MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
 RETURN a, r, b
 """
 
-FETCH_NODES_SHARD_UNORDERED_QUERY_FORMAT = """\
-MATCH (n:{type})
-{where}RETURN n SKIP $shard_offset LIMIT $shard_limit
-"""
-
-FETCH_RELATIONSHIPS_SHARD_UNORDERED_QUERY_FORMAT = """\
-MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
-{where}RETURN a, r, b SKIP $shard_offset LIMIT $shard_limit
-"""
 
 COUNT_NODES_BY_TYPE_QUERY_FORMAT = """\
 MATCH (n:{type})
@@ -181,7 +172,6 @@ class Neo4jTypeRetriever(TypeRetriever):
         shard_size: int | None = None,
         distribution: str = DEFAULT_DISTRIBUTION,
         max_shards_per_type: int = 10000,
-        ordered_shards: bool = True,
     ) -> None:
         super().__init__(schema=schema)
         self.database_connection = database_connection
@@ -193,7 +183,6 @@ class Neo4jTypeRetriever(TypeRetriever):
         self.node_only = node_only
         self.shard_size = shard_size
         self.max_shards_per_type = max_shards_per_type
-        self.ordered_shards = ordered_shards
         self.distributionStrategy: DistributionStrategy = DISTRIBUTION_STRATEGIES.get(
             distribution, SequentialDistribution
         )()
@@ -219,7 +208,7 @@ class Neo4jTypeRetriever(TypeRetriever):
                 [
                     self.buildNodeShardExtractor(
                         nodeType,
-                        None if not self.ordered_shards else self.key_field_for_node_type(nodeType, schema),
+                        self.key_field_for_node_type(nodeType, schema),
                         offset,
                         limit,
                         schema=schema,
@@ -259,7 +248,7 @@ class Neo4jTypeRetriever(TypeRetriever):
                         adjacency.from_node_type,
                         adjacency.to_node_type,
                         relType,
-                        None if not self.ordered_shards else self.key_field_for_relationship_type(relType, schema),
+                        self.key_field_for_relationship_type(relType, schema),
                         offset,
                         limit,
                         schema=schema,
@@ -348,11 +337,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         cutoff: datetime | None = None,
     ) -> Extractor:
         where = self.build_where_clause("n")
-        if not self.ordered_shards:
-            statement = FETCH_NODES_SHARD_UNORDERED_QUERY_FORMAT.format(
-                type=node_type, where=where
-            )
-        elif key_field:
+        if key_field:
             statement = FETCH_NODES_SHARD_QUERY_FORMAT.format(
                 type=node_type, where=where, key_field=key_field
             )
@@ -421,14 +406,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         cutoff: datetime | None = None,
     ) -> Extractor:
         where = self.build_where_clause("r", sample=True)
-        if not self.ordered_shards:
-            statement = FETCH_RELATIONSHIPS_SHARD_UNORDERED_QUERY_FORMAT.format(
-                from_node_type=from_node_type,
-                relationship_type=relationship_type,
-                to_node_type=to_node_type,
-                where=where,
-            )
-        elif key_field:
+        if key_field:
             statement = FETCH_RELATIONSHIPS_SHARD_QUERY_FORMAT.format(
                 from_node_type=from_node_type,
                 relationship_type=relationship_type,
@@ -554,21 +532,15 @@ class Neo4jTypeRetriever(TypeRetriever):
             return None
         return datetime.now(timezone.utc) - timedelta(hours=self.latest_hours)
 
-    def key_field_for_node_type(self, node_type: str, schema: Schema) -> str:
-        # Prefer latest_hours window field first (tightest drift bound), then schema
-        # key (unique, stable, indexed), then last_ingested_at as universal fallback.
-        # elementId is avoided: it has no property index so ORDER BY elementId is O(N).
+    def key_field_for_node_type(self, node_type: str, schema: Schema) -> Optional[str]:
         if self.latest_hours is not None:
             return LAST_INGESTED_AT_PROPERTY
         nodeSchema = schema.get_node_type_by_name(node_type)
         if nodeSchema and nodeSchema.keys:
             return next(iter(nodeSchema.keys))
-        return LAST_INGESTED_AT_PROPERTY
+        return None
 
     def key_field_for_relationship_type(
         self, relationship_type: str, schema: Schema
-    ) -> str:
-        # Relationships have no schema keys — last_ingested_at is the only indexed
-        # property universal to all relationship types. elementId is avoided for the
-        # same reason as nodes: no property index backing the ORDER BY.
-        return LAST_INGESTED_AT_PROPERTY
+    ) -> Optional[str]:
+        return LAST_INGESTED_AT_PROPERTY if self.latest_hours is not None else None
