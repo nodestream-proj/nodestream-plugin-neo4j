@@ -74,13 +74,13 @@ MATCH ()-[r:{relationship_type}]->()
 class Neo4jMappingExtractor(Extractor):
     """Paginates a Neo4j query and maps each record."""
 
-    def __init__(self, inner: Neo4jExtractor, mapRecord: Callable) -> None:
+    def __init__(self, inner: Neo4jExtractor, map_record: Callable) -> None:
         self.inner = inner
-        self.mapRecord = mapRecord
+        self.map_record = map_record
 
     async def extract_records(self) -> AsyncGenerator:
         async for record in self.inner.extract_records():
-            yield self.mapRecord(record)
+            yield self.map_record(record)
 
 
 class Neo4jShardExtractor(Extractor):
@@ -91,19 +91,19 @@ class Neo4jShardExtractor(Extractor):
         connection: Neo4jDatabaseConnection,
         statement: str,
         params: dict,
-        mapRecord: Callable,
+        map_record: Callable,
     ) -> None:
         self.connection = connection
         self.statement = statement
         self.params = params
-        self.mapRecord = mapRecord
+        self.map_record = map_record
 
     async def extract_records(self) -> AsyncGenerator:
         results = await self.connection.execute(
             Query(self.statement, self.params), routing_=RoutingControl.READ
         )
         for record in results:
-            yield self.mapRecord(record)
+            yield self.map_record(record)
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ class DistributionStrategy(ABC):
 
     @abstractmethod
     def distribute(
-        self, extractorsByType: List[List[Extractor]]
+        self, extractors_by_type: List[List[Extractor]]
     ) -> AsyncGenerator[Extractor, None]:
         ...  # pragma: no cover
 
@@ -125,9 +125,9 @@ class SequentialDistribution(DistributionStrategy):
     """Drain all shards of one type before moving to the next."""
 
     async def distribute(
-        self, extractorsByType: List[List[Extractor]]
+        self, extractors_by_type: List[List[Extractor]]
     ) -> AsyncGenerator[Extractor, None]:
-        for extractors in extractorsByType:
+        for extractors in extractors_by_type:
             for extractor in extractors:
                 yield extractor
 
@@ -136,10 +136,10 @@ class RoundRobinDistribution(DistributionStrategy):
     """Yield one shard per type in rotation, so all types make progress together."""
 
     async def distribute(
-        self, extractorsByType: List[List[Extractor]]
+        self, extractors_by_type: List[List[Extractor]]
     ) -> AsyncGenerator[Extractor, None]:
         sentinel = object()
-        for column in zip_longest(*extractorsByType, fillvalue=sentinel):
+        for column in zip_longest(*extractors_by_type, fillvalue=sentinel):
             for extractor in column:
                 if extractor is not sentinel:
                     yield extractor
@@ -189,101 +189,109 @@ class Neo4jTypeRetriever(TypeRetriever):
         self.node_only = node_only
         self.shard_size = shard_size
         self.max_shards_per_type = max_shards_per_type
-        self.distributionStrategy: DistributionStrategy = DISTRIBUTION_STRATEGIES.get(
+        self.distribution_strategy: DistributionStrategy = DISTRIBUTION_STRATEGIES.get(
             distribution, SequentialDistribution
         )()
 
-    # -- fetchExtractors --------------------------------------------------------
+    # -- fetch_extractors --------------------------------------------------------
 
-    async def fetchExtractors(self) -> AsyncGenerator[Extractor, None]:
+    async def fetch_extractors(self) -> AsyncGenerator[Extractor, None]:
         if self.node_only:
-            async for extractor in self._fetchNodeExtractors():
+            async for extractor in self._fetch_node_extractors():
                 yield extractor
         else:
-            async for extractor in self._fetchRelExtractors():
+            async for extractor in self._fetch_rel_extractors():
                 yield extractor
 
-    async def _fetchNodeExtractors(self) -> AsyncGenerator[Extractor, None]:
+    # Keep the old name as an alias so the abstract base (which still uses
+    # fetchExtractors) continues to work without modification.
+    fetchExtractors = fetch_extractors
+
+    async def _fetch_node_extractors(self) -> AsyncGenerator[Extractor, None]:
         schema = self.schema
-        cutoff = self.snapshotCutoff()
+        cutoff = self._snapshot_cutoff()
         if self.shard_size is not None:
             counts = await asyncio.gather(
                 *(self.preview_node_count(t, cutoff=cutoff) for t in self.node_types)
             )
-            extractorsByType = [
+            extractors_by_type = [
                 [
-                    self.buildNodeShardExtractor(
-                        nodeType,
-                        self.key_field_for_node_type(nodeType, schema),
+                    self._build_node_shard_extractor(
+                        node_type,
+                        self.key_field_for_node_type(node_type, schema),
                         offset,
                         limit,
                         schema=schema,
                         cutoff=cutoff,
                     )
-                    for offset, limit in self.compute_shards(count, self.shard_size)
+                    for offset, limit in self._compute_shards(count, self.shard_size)
                 ]
-                for nodeType, count in zip(self.node_types, counts)
+                for node_type, count in zip(self.node_types, counts)
                 if count > 0
             ]
         else:
-            extractorsByType = [
-                [self.buildNodeExtractor(nodeType, schema=schema, cutoff=cutoff)]
-                for nodeType in self.node_types
+            extractors_by_type = [
+                [self._build_node_extractor(node_type, schema=schema, cutoff=cutoff)]
+                for node_type in self.node_types
             ]
-        async for extractor in self.distributionStrategy.distribute(extractorsByType):
+        async for extractor in self.distribution_strategy.distribute(
+            extractors_by_type
+        ):
             yield extractor
 
-    async def _fetchRelExtractors(self) -> AsyncGenerator[Extractor, None]:
+    async def _fetch_rel_extractors(self) -> AsyncGenerator[Extractor, None]:
         schema = self.schema
-        cutoff = self.snapshotCutoff()
+        cutoff = self._snapshot_cutoff()
 
-        # Build (relType, adjacencies) pairs, skipping types with no adjacencies.
-        relTypeAdj = [
-            (relType, list(schema.get_adjacencies_by_relationship_type(relType)))
-            for relType in self.relationship_types
+        # Build (rel_type, adjacencies) pairs, skipping types with no adjacencies.
+        rel_type_adj = [
+            (rel_type, list(schema.get_adjacencies_by_relationship_type(rel_type)))
+            for rel_type in self.relationship_types
         ]
-        relTypeAdj = [(rt, adjs) for rt, adjs in relTypeAdj if adjs]
+        rel_type_adj = [(rt, adjs) for rt, adjs in rel_type_adj if adjs]
 
         if self.shard_size is not None:
             counts = await asyncio.gather(
                 *(
                     self.preview_relationship_count(rt, cutoff=cutoff)
-                    for rt, _ in relTypeAdj
+                    for rt, _ in rel_type_adj
                 )
             )
-            extractorsByType = [
+            extractors_by_type = [
                 [
-                    self.buildRelShardExtractor(
+                    self._build_rel_shard_extractor(
                         adjacency.from_node_type,
                         adjacency.to_node_type,
-                        relType,
-                        self.key_field_for_relationship_type(relType, schema),
+                        rel_type,
+                        self.key_field_for_relationship_type(rel_type, schema),
                         offset,
                         limit,
                         schema=schema,
                         cutoff=cutoff,
                     )
-                    for offset, limit in self.compute_shards(count, self.shard_size)
+                    for offset, limit in self._compute_shards(count, self.shard_size)
                     for adjacency in adjacencies
                 ]
-                for (relType, adjacencies), count in zip(relTypeAdj, counts)
+                for (rel_type, adjacencies), count in zip(rel_type_adj, counts)
                 if count > 0
             ]
         else:
-            extractorsByType = [
+            extractors_by_type = [
                 [
-                    self.buildRelExtractor(
+                    self._build_rel_extractor(
                         adjacency.from_node_type,
                         adjacency.to_node_type,
-                        relType,
+                        rel_type,
                         schema=schema,
                         cutoff=cutoff,
                     )
                     for adjacency in adjacencies
                 ]
-                for relType, adjacencies in relTypeAdj
+                for rel_type, adjacencies in rel_type_adj
             ]
-        async for extractor in self.distributionStrategy.distribute(extractorsByType):
+        async for extractor in self.distribution_strategy.distribute(
+            extractors_by_type
+        ):
             yield extractor
 
     # -- Mapping helpers --------------------------------------------------------
@@ -292,21 +300,21 @@ class Neo4jTypeRetriever(TypeRetriever):
         self, node: Neo4jNode, node_type: str, schema: Schema | None = None
     ) -> Node:
         properties = PropertySet(node)
-        keyValues = PropertySet.empty()
+        key_values = PropertySet.empty()
         if schema is not None:
-            nodeSchema = schema.get_node_type_by_name(node_type)
-            if nodeSchema is not None:
-                for key in nodeSchema.keys:
+            node_schema = schema.get_node_type_by_name(node_type)
+            if node_schema is not None:
+                for key in node_schema.keys:
                     if key in properties:
-                        keyValues[key] = properties.pop(key)
-        additionalTypes: Tuple[str, ...] = tuple(
+                        key_values[key] = properties.pop(key)
+        additional_types: Tuple[str, ...] = tuple(
             label for label in node.labels if label != node_type
         )
         return Node(
             type=node_type,
             properties=properties,
-            key_values=keyValues,
-            additional_types=additionalTypes,
+            key_values=key_values,
+            additional_types=additional_types,
         )
 
     def map_neo4j_relationship_to_nodestream_relationship(
@@ -317,9 +325,51 @@ class Neo4jTypeRetriever(TypeRetriever):
             properties=PropertySet(relationship),
         )
 
+    # -- Record mapper helpers --------------------------------------------------
+
+    def _node_ingest_mapper(
+        self, record, node_type: str, schema, *, from_shard: bool = False
+    ) -> object:
+        raw = record["n"] if from_shard else record.original["n"]
+        return self.map_neo4j_node_to_nodestream_node(
+            raw, node_type=node_type, schema=schema
+        ).into_ingest()
+
+    def _rel_ingest_mapper(
+        self,
+        record,
+        from_node_type: str,
+        to_node_type: str,
+        relationship_type: str,
+        schema,
+        *,
+        from_shard: bool = False,
+    ) -> object:
+        rec = record if from_shard else record.original
+        return RelationshipWithNodes(
+            from_node=self.map_neo4j_node_to_nodestream_node(
+                rec["a"], node_type=from_node_type, schema=schema
+            ),
+            to_node=self.map_neo4j_node_to_nodestream_node(
+                rec["b"], node_type=to_node_type, schema=schema
+            ),
+            relationship=self.map_neo4j_relationship_to_nodestream_relationship(
+                rec["r"], relationship_type=relationship_type
+            ),
+        ).into_ingest()
+
+    # -- Shard params helper ----------------------------------------------------
+
+    def _shard_params(self, cutoff, shard_offset: int, shard_limit: int) -> dict:
+        return dict(
+            self.build_filter_parameters(cutoff),
+            shard_offset=shard_offset,
+            shard_limit=shard_limit,
+        )
+
     # -- Extractor builders -----------------------------------------------------
 
-    def buildNodeExtractor(
+    def _build_node_extractor(
         self,
         node_type: str,
         schema: Schema | None = None,
@@ -334,12 +384,19 @@ class Neo4jTypeRetriever(TypeRetriever):
         )
         return Neo4jMappingExtractor(
             inner,
-            lambda record, nt=node_type: self.map_neo4j_node_to_nodestream_node(
-                record.original["n"], node_type=nt, schema=schema
-            ).into_ingest(),
+            lambda record, nt=node_type: self._node_ingest_mapper(record, nt, schema),
         )
 
-    def buildNodeShardExtractor(
+    # Keep old public name as alias for test backwards compatibility.
+    def buildNodeExtractor(
+        self,
+        node_type: str,
+        schema: Schema | None = None,
+        cutoff: datetime | None = None,
+    ) -> Extractor:
+        return self._build_node_extractor(node_type, schema=schema, cutoff=cutoff)
+
+    def _build_node_shard_extractor(
         self,
         node_type: str,
         key_field: Optional[str],
@@ -357,21 +414,36 @@ class Neo4jTypeRetriever(TypeRetriever):
             statement = FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT.format(
                 type=node_type, where=where
             )
-        params = dict(
-            self.build_filter_parameters(cutoff),
-            shard_offset=shard_offset,
-            shard_limit=shard_limit,
-        )
+        params = self._shard_params(cutoff, shard_offset, shard_limit)
         return Neo4jShardExtractor(
             self.database_connection,
             statement,
             params,
-            lambda record, nt=node_type: self.map_neo4j_node_to_nodestream_node(
-                record["n"], node_type=nt, schema=schema
-            ).into_ingest(),
+            lambda record, nt=node_type: self._node_ingest_mapper(
+                record, nt, schema, from_shard=True
+            ),
         )
 
-    def buildRelExtractor(
+    # Keep old public name as alias for test backwards compatibility.
+    def buildNodeShardExtractor(
+        self,
+        node_type: str,
+        key_field: Optional[str],
+        shard_offset: int,
+        shard_limit: int,
+        schema: Schema | None = None,
+        cutoff: datetime | None = None,
+    ) -> Extractor:
+        return self._build_node_shard_extractor(
+            node_type,
+            key_field,
+            shard_offset,
+            shard_limit,
+            schema=schema,
+            cutoff=cutoff,
+        )
+
+    def _build_rel_extractor(
         self,
         from_node_type: str,
         to_node_type: str,
@@ -393,20 +465,29 @@ class Neo4jTypeRetriever(TypeRetriever):
         )
         return Neo4jMappingExtractor(
             inner,
-            lambda record, fnt=from_node_type, tnt=to_node_type, rt=relationship_type: RelationshipWithNodes(
-                from_node=self.map_neo4j_node_to_nodestream_node(
-                    record.original["a"], node_type=fnt, schema=schema
-                ),
-                to_node=self.map_neo4j_node_to_nodestream_node(
-                    record.original["b"], node_type=tnt, schema=schema
-                ),
-                relationship=self.map_neo4j_relationship_to_nodestream_relationship(
-                    record.original["r"], relationship_type=rt
-                ),
-            ).into_ingest(),
+            lambda record, fnt=from_node_type, tnt=to_node_type, rt=relationship_type: self._rel_ingest_mapper(
+                record, fnt, tnt, rt, schema
+            ),
         )
 
-    def buildRelShardExtractor(
+    # Keep old public name as alias for test backwards compatibility.
+    def buildRelExtractor(
+        self,
+        from_node_type: str,
+        to_node_type: str,
+        relationship_type: str,
+        schema: Schema | None = None,
+        cutoff: datetime | None = None,
+    ) -> Extractor:
+        return self._build_rel_extractor(
+            from_node_type,
+            to_node_type,
+            relationship_type,
+            schema=schema,
+            cutoff=cutoff,
+        )
+
+    def _build_rel_shard_extractor(
         self,
         from_node_type: str,
         to_node_type: str,
@@ -433,26 +514,37 @@ class Neo4jTypeRetriever(TypeRetriever):
                 to_node_type=to_node_type,
                 where=where,
             )
-        params = dict(
-            self.build_filter_parameters(cutoff),
-            shard_offset=shard_offset,
-            shard_limit=shard_limit,
-        )
+        params = self._shard_params(cutoff, shard_offset, shard_limit)
         return Neo4jShardExtractor(
             self.database_connection,
             statement,
             params,
-            lambda record, fnt=from_node_type, tnt=to_node_type, rt=relationship_type: RelationshipWithNodes(
-                from_node=self.map_neo4j_node_to_nodestream_node(
-                    record["a"], node_type=fnt, schema=schema
-                ),
-                to_node=self.map_neo4j_node_to_nodestream_node(
-                    record["b"], node_type=tnt, schema=schema
-                ),
-                relationship=self.map_neo4j_relationship_to_nodestream_relationship(
-                    record["r"], relationship_type=rt
-                ),
-            ).into_ingest(),
+            lambda record, fnt=from_node_type, tnt=to_node_type, rt=relationship_type: self._rel_ingest_mapper(
+                record, fnt, tnt, rt, schema, from_shard=True
+            ),
+        )
+
+    # Keep old public name as alias for test backwards compatibility.
+    def buildRelShardExtractor(
+        self,
+        from_node_type: str,
+        to_node_type: str,
+        relationship_type: str,
+        key_field: Optional[str],
+        shard_offset: int,
+        shard_limit: int,
+        schema: Schema | None = None,
+        cutoff: datetime | None = None,
+    ) -> Extractor:
+        return self._build_rel_shard_extractor(
+            from_node_type,
+            to_node_type,
+            relationship_type,
+            key_field,
+            shard_offset,
+            shard_limit,
+            schema=schema,
+            cutoff=cutoff,
         )
 
     # -- Query builders ---------------------------------------------------------
@@ -506,56 +598,54 @@ class Neo4jTypeRetriever(TypeRetriever):
         first = next(iter(results), None)
         return int(first["count"]) if first is not None else 0
 
-    async def build_histogram(self) -> TypeHistogram:
-        cutoff = self.snapshotCutoff()
-        nodeCounts = dict(
-            zip(
-                self.node_types,
-                await asyncio.gather(
-                    *(
-                        self.preview_node_count(t, cutoff=cutoff)
-                        for t in self.node_types
-                    )
-                ),
-            )
-        )
-        relCounts = {}
-        if not self.node_only:
-            relCounts = dict(
-                zip(
-                    self.relationship_types,
-                    await asyncio.gather(
-                        *(
-                            self.preview_relationship_count(t, cutoff=cutoff)
-                            for t in self.relationship_types
-                        )
-                    ),
-                )
-            )
-        return TypeHistogram(node_counts=nodeCounts, relationship_counts=relCounts)
+    async def _gather_counts(self, types, count_fn, cutoff) -> dict:
+        counts = await asyncio.gather(*(count_fn(t, cutoff=cutoff) for t in types))
+        return dict(zip(types, counts))
 
-    def compute_shards(
+    async def build_histogram(self) -> TypeHistogram:
+        cutoff = self._snapshot_cutoff()
+        node_counts = await self._gather_counts(
+            self.node_types, self.preview_node_count, cutoff
+        )
+        rel_counts = {}
+        if not self.node_only:
+            rel_counts = await self._gather_counts(
+                self.relationship_types, self.preview_relationship_count, cutoff
+            )
+        return TypeHistogram(node_counts=node_counts, relationship_counts=rel_counts)
+
+    def _compute_shards(
         self, total_count: int, shard_size: int
     ) -> List[Tuple[int, int]]:
         if total_count <= 0 or shard_size <= 0:
             return []
-        numShards = math.ceil(total_count / shard_size)
+        num_shards = math.ceil(total_count / shard_size)
         return [
             (i * shard_size, min(shard_size, total_count - i * shard_size))
-            for i in range(numShards)
+            for i in range(num_shards)
         ]
 
-    def snapshotCutoff(self) -> datetime | None:
+    # Keep old public name as alias for test backwards compatibility.
+    def compute_shards(
+        self, total_count: int, shard_size: int
+    ) -> List[Tuple[int, int]]:
+        return self._compute_shards(total_count, shard_size)
+
+    def _snapshot_cutoff(self) -> datetime | None:
         if self.latest_hours is None:
             return None
         return datetime.now(timezone.utc) - timedelta(hours=self.latest_hours)
 
+    # Keep old public name as alias for test backwards compatibility.
+    def snapshotCutoff(self) -> datetime | None:
+        return self._snapshot_cutoff()
+
     def key_field_for_node_type(self, node_type: str, schema: Schema) -> Optional[str]:
         if self.latest_hours is not None:
             return LAST_INGESTED_AT_PROPERTY
-        nodeSchema = schema.get_node_type_by_name(node_type)
-        if nodeSchema and nodeSchema.keys:
-            return next(iter(nodeSchema.keys))
+        node_schema = schema.get_node_type_by_name(node_type)
+        if node_schema and node_schema.keys:
+            return next(iter(node_schema.keys))
         return None
 
     def key_field_for_relationship_type(

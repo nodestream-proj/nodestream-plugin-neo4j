@@ -482,7 +482,7 @@ async def test_mapping_extractor_extract_records(mocker):
         return_value=async_generator(inner_record)
     )
     mapped = []
-    extractor = Neo4jMappingExtractor(inner_extractor, mapRecord=lambda r: r["n"])
+    extractor = Neo4jMappingExtractor(inner_extractor, map_record=lambda r: r["n"])
     async for record in extractor.extract_records():
         mapped.append(record)
     assert_that(mapped, has_length(1))
@@ -498,7 +498,7 @@ async def test_shard_extractor_extract_records(mocker):
         connection=connection,
         statement="MATCH (n:Person) SKIP $shard_offset LIMIT $shard_limit RETURN n",
         params={"shard_offset": 0, "shard_limit": 10},
-        mapRecord=lambda r: r["n"],
+        map_record=lambda r: r["n"],
     )
     results = []
     async for record in extractor.extract_records():
