@@ -7,7 +7,7 @@ from neo4j import RoutingControl
 from neo4j.graph import Node as Neo4jNode
 from neo4j.graph import Relationship as Neo4jRelationship
 from nodestream.databases.copy import TypeHistogram
-from nodestream.model import Node, PropertySet, Relationship
+from nodestream.model import PropertySet, Relationship
 from nodestream.schema.state import (
     Adjacency,
     AdjacencyCardinality,
@@ -21,9 +21,11 @@ from nodestream.schema.state import (
 from nodestream_plugin_neo4j.neo4j_database import Neo4jDatabaseConnection
 from nodestream_plugin_neo4j.type_retriever import (
     LAST_INGESTED_AT_PROPERTY,
-    Neo4jNodeShardExtractor,
-    Neo4jRelationshipShardExtractor,
+    Neo4jNodeExtractor,
+    Neo4jRelationshipExtractor,
     Neo4jTypeRetriever,
+    map_neo4j_node_to_nodestream_node,
+    map_neo4j_relationship_to_nodestream_relationship,
 )
 
 
@@ -94,22 +96,23 @@ async def async_generator(*items):
 # -- Mapping tests ----------------------------------------------------------
 
 
-def test_map_neo4j_node_to_nodestream_node(subject, empty_schema):
+def test_map_neo4j_node_to_nodestream_node(basic_schema):
     neo_node = FakeNeo4jNode(("Person", "Employee"), {"name": "John", "id": 123})
-    result = subject.map_neo4j_node_to_nodestream_node(
-        type_cast(Neo4jNode, neo_node), node_type="Person", schema=empty_schema
+    result = map_neo4j_node_to_nodestream_node(
+        type_cast(Neo4jNode, neo_node), nodeType="Person", schema=basic_schema
     )
-    assert result == Node(
-        type="Person",
-        properties=PropertySet({"name": "John", "id": 123}),
-        additional_types=("Employee",),
-    )
+    assert result is not None
+    assert result.type == "Person"
+    # "name" is a key field in basic_schema, so it moves to key_values
+    assert result.key_values["name"] == "John"
+    assert result.properties["id"] == 123
+    assert "Employee" in result.additional_types
 
 
-def test_map_neo4j_relationship_to_nodestream_relationship(subject):
+def test_map_neo4j_relationship_to_nodestream_relationship():
     rel = FakeNeo4jRel("KNOWS", {"since": 2019})
-    result = subject.map_neo4j_relationship_to_nodestream_relationship(
-        type_cast(Neo4jRelationship, rel), relationship_type="KNOWS"
+    result = map_neo4j_relationship_to_nodestream_relationship(
+        type_cast(Neo4jRelationship, rel), relationshipType="KNOWS"
     )
     assert result == Relationship(type="KNOWS", properties=PropertySet({"since": 2019}))
 
@@ -153,12 +156,19 @@ def test_where_clause_with_both_filters(filtered_subject):
     )
 
 
-def test_filter_parameters_empty_when_no_filters(subject):
-    assert_that(subject.build_filter_parameters(), equal_to({}))
+def test_filter_parameters_always_includes_cutoff(subject):
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
+    params = subject.build_filter_parameters(cutoff)
+    assert params == {"cutoff": cutoff}
 
 
 def test_filter_parameters_with_latest_hours(filtered_subject):
-    params = filtered_subject.build_filter_parameters()
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
+    params = filtered_subject.build_filter_parameters(cutoff)
     assert set(params.keys()) == {"cutoff"}
 
 
@@ -175,41 +185,80 @@ def test_sample_ratio_of_one_is_ignored(mocker):
 # -- Extractor builder tests -------------------------------------------------
 
 
-def test_build_node_shard_extractor_with_key_field(subject, empty_schema):
-    extractor = subject.buildNodeShardExtractor("Person", "name", 0, 1000, schema=empty_schema)
-    assert isinstance(extractor, Neo4jNodeShardExtractor)
+def test_build_node_extractor_with_key_field(subject, empty_schema):
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
+    extractor = subject.buildNodeShardExtractor(
+        "Person", "name", 0, 1000, schema=empty_schema, cutoff=cutoff
+    )
+    assert isinstance(extractor, Neo4jNodeExtractor)
     assert "ORDER BY n.`name`" in extractor.statement
     assert extractor.params["shard_offset"] == 0
     assert extractor.params["shard_limit"] == 1000
+    assert extractor.params["cutoff"] == cutoff
     assert extractor.nodeType == "Person"
 
 
-def test_build_node_shard_extractor_without_key_field(subject, empty_schema):
-    extractor = subject.buildNodeShardExtractor("Person", None, 500, 500, schema=empty_schema)
-    assert isinstance(extractor, Neo4jNodeShardExtractor)
-    assert "ORDER BY elementId(n)" in extractor.statement
+def test_build_node_extractor_uses_last_ingested_at_fallback(subject, empty_schema):
+    """When key_field_for_node_type returns LAST_INGESTED_AT_PROPERTY for a type
+    with no schema keys, the builder still produces a valid ORDER BY clause."""
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
+    extractor = subject.buildNodeShardExtractor(
+        "Person",
+        LAST_INGESTED_AT_PROPERTY,
+        500,
+        500,
+        schema=empty_schema,
+        cutoff=cutoff,
+    )
+    assert isinstance(extractor, Neo4jNodeExtractor)
+    assert f"ORDER BY n.`{LAST_INGESTED_AT_PROPERTY}`" in extractor.statement
     assert extractor.params["shard_offset"] == 500
     assert extractor.params["shard_limit"] == 500
 
 
-def test_build_rel_shard_extractor_with_key_field(subject, empty_schema):
+def test_build_relationship_extractor_with_key_field(subject, empty_schema):
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
     extractor = subject.buildRelationshipShardExtractor(
-        "Person", "Person", "BEST_FRIEND_OF", "since", 0, 2000, schema=empty_schema
+        "Person",
+        "Person",
+        "BEST_FRIEND_OF",
+        "since",
+        0,
+        2000,
+        schema=empty_schema,
+        cutoff=cutoff,
     )
-    assert isinstance(extractor, Neo4jRelationshipShardExtractor)
+    assert isinstance(extractor, Neo4jRelationshipExtractor)
     assert "ORDER BY r.`since`" in extractor.statement
     assert extractor.params["shard_offset"] == 0
     assert extractor.params["shard_limit"] == 2000
+    assert extractor.params["cutoff"] == cutoff
     assert extractor.fromNodeType == "Person"
     assert extractor.toNodeType == "Person"
     assert extractor.relationshipType == "BEST_FRIEND_OF"
 
 
-def test_build_rel_shard_extractor_without_key_field(subject, empty_schema):
+def test_build_relationship_extractor_without_key_field(subject, empty_schema):
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
     extractor = subject.buildRelationshipShardExtractor(
-        "Person", "Person", "BEST_FRIEND_OF", None, 100, 900, schema=empty_schema
+        "Person",
+        "Person",
+        "BEST_FRIEND_OF",
+        None,
+        100,
+        900,
+        schema=empty_schema,
+        cutoff=cutoff,
     )
-    assert isinstance(extractor, Neo4jRelationshipShardExtractor)
+    assert isinstance(extractor, Neo4jRelationshipExtractor)
     assert "ORDER BY elementId(r)" in extractor.statement
     assert extractor.params["shard_offset"] == 100
     assert extractor.params["shard_limit"] == 900
@@ -220,8 +269,11 @@ def test_build_rel_shard_extractor_without_key_field(subject, empty_schema):
 
 @pytest.mark.asyncio
 async def test_preview_node_count(subject):
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
     subject.database_connection.execute.return_value = [{"count": 42}]
-    count = await subject.preview_node_count("Person")
+    count = await subject.preview_node_count("Person", cutoff=cutoff)
     assert_that(count, equal_to(42))
     call_kwargs = subject.database_connection.execute.call_args
     assert_that(call_kwargs.kwargs.get("routing_"), equal_to(RoutingControl.READ))
@@ -229,14 +281,20 @@ async def test_preview_node_count(subject):
 
 @pytest.mark.asyncio
 async def test_preview_node_count_empty_result(subject):
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
     subject.database_connection.execute.return_value = []
-    assert_that(await subject.preview_node_count("Ghost"), equal_to(0))
+    assert_that(await subject.preview_node_count("Ghost", cutoff=cutoff), equal_to(0))
 
 
 @pytest.mark.asyncio
 async def test_preview_relationship_count(subject):
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
     subject.database_connection.execute.return_value = [{"count": 99}]
-    count = await subject.preview_relationship_count("KNOWS")
+    count = await subject.preview_relationship_count("KNOWS", cutoff=cutoff)
     assert_that(count, equal_to(99))
     call_kwargs = subject.database_connection.execute.call_args
     assert_that(call_kwargs.kwargs.get("routing_"), equal_to(RoutingControl.READ))
@@ -244,14 +302,23 @@ async def test_preview_relationship_count(subject):
 
 @pytest.mark.asyncio
 async def test_preview_relationship_count_empty_result(subject):
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
     subject.database_connection.execute.return_value = []
-    assert_that(await subject.preview_relationship_count("GHOST_REL"), equal_to(0))
+    assert_that(
+        await subject.preview_relationship_count("GHOST_REL", cutoff=cutoff),
+        equal_to(0),
+    )
 
 
 @pytest.mark.asyncio
 async def test_preview_node_count_with_filters(filtered_subject):
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
     filtered_subject.database_connection.execute.return_value = [{"count": 10}]
-    count = await filtered_subject.preview_node_count("Person")
+    count = await filtered_subject.preview_node_count("Person", cutoff=cutoff)
     assert_that(count, equal_to(10))
     query_arg = filtered_subject.database_connection.execute.call_args.args[0]
     assert "WHERE" in query_arg.query_statement
@@ -293,26 +360,25 @@ def basic_schema():
     return schema
 
 
-def test_map_neo4j_node_to_nodestream_node_with_schema_extracts_keys(
-    subject, basic_schema
-):
+def test_map_neo4j_node_to_nodestream_node_with_schema_extracts_keys(basic_schema):
     neo_node = FakeNeo4jNode(("Person",), {"name": "Alice", "age": 30})
-    result = subject.map_neo4j_node_to_nodestream_node(
-        type_cast(Neo4jNode, neo_node), node_type="Person", schema=basic_schema
+    result = map_neo4j_node_to_nodestream_node(
+        type_cast(Neo4jNode, neo_node), nodeType="Person", schema=basic_schema
     )
+    assert result is not None
     assert "name" in result.key_values
     assert result.key_values["name"] == "Alice"
     assert "name" not in result.properties
 
 
-def test_map_neo4j_node_to_nodestream_node_schema_unknown_type(subject, basic_schema):
+def test_map_neo4j_node_to_nodestream_node_schema_unknown_type_returns_none(
+    basic_schema,
+):
     neo_node = FakeNeo4jNode(("Unknown",), {"x": 1})
-    result = subject.map_neo4j_node_to_nodestream_node(
-        type_cast(Neo4jNode, neo_node), node_type="Unknown", schema=basic_schema
+    result = map_neo4j_node_to_nodestream_node(
+        type_cast(Neo4jNode, neo_node), nodeType="Unknown", schema=basic_schema
     )
-    assert result.type == "Unknown"
-    assert result.properties["x"] == 1
-    assert len(result.key_values) == 0
+    assert result is None
 
 
 # -- computeShards ----------------------------------------------------------
@@ -346,16 +412,26 @@ def test_key_field_for_node_type_from_schema_keys(basic_schema, mocker):
     assert retriever.key_field_for_node_type("Person", basic_schema) == "name"
 
 
-def test_key_field_for_node_type_no_schema_keys(basic_schema, mocker):
+def test_key_field_for_node_type_no_schema_keys_falls_back_to_last_ingested_at(
+    basic_schema, mocker
+):
     connection = mocker.Mock()
     retriever = Neo4jTypeRetriever(connection, basic_schema, shard_size=1000)
-    assert retriever.key_field_for_node_type("Organization", basic_schema) is None
+    assert (
+        retriever.key_field_for_node_type("Organization", basic_schema)
+        == LAST_INGESTED_AT_PROPERTY
+    )
 
 
-def test_key_field_for_node_type_unknown_type(basic_schema, mocker):
+def test_key_field_for_node_type_unknown_type_falls_back_to_last_ingested_at(
+    basic_schema, mocker
+):
     connection = mocker.Mock()
     retriever = Neo4jTypeRetriever(connection, basic_schema, shard_size=1000)
-    assert retriever.key_field_for_node_type("Ghost", basic_schema) is None
+    assert (
+        retriever.key_field_for_node_type("Ghost", basic_schema)
+        == LAST_INGESTED_AT_PROPERTY
+    )
 
 
 def test_key_field_for_relationship_type_with_latest_hours(basic_schema, mocker):
@@ -393,7 +469,7 @@ async def test_fetch_extractors_relationships_only_by_default(mocker, basic_sche
     # BEST_FRIEND_OF: 3 shards (2500 / 1000), 1 adjacency
     assert_that(extractors, has_length(3))
     for extractor in extractors:
-        assert isinstance(extractor, Neo4jRelationshipShardExtractor)
+        assert isinstance(extractor, Neo4jRelationshipExtractor)
 
 
 @pytest.mark.asyncio
@@ -409,15 +485,15 @@ async def test_fetch_extractors_preload_nodes_yields_nodes_then_relationships(
         relationship_counts={"BEST_FRIEND_OF": 1000},
     )
     extractors = [e async for e in retriever.fetch_extractors()]
-    nodeExtractors = [e for e in extractors if isinstance(e, Neo4jNodeShardExtractor)]
+    nodeExtractors = [e for e in extractors if isinstance(e, Neo4jNodeExtractor)]
     relationshipExtractors = [
-        e for e in extractors if isinstance(e, Neo4jRelationshipShardExtractor)
+        e for e in extractors if isinstance(e, Neo4jRelationshipExtractor)
     ]
     # 2 node types * 1 shard each = 2, then 1 rel type * 1 adjacency * 1 shard = 1
     assert_that(nodeExtractors, has_length(2))
     assert_that(relationshipExtractors, has_length(1))
     # Nodes come first
-    assert isinstance(extractors[0], Neo4jNodeShardExtractor)
+    assert isinstance(extractors[0], Neo4jNodeExtractor)
 
 
 @pytest.mark.asyncio
@@ -447,20 +523,20 @@ async def test_fetch_extractors_skips_types_with_zero_count(mocker, basic_schema
     assert extractors == []
 
 
-# -- Neo4jNodeShardExtractor / Neo4jRelationshipShardExtractor extract_records
+# -- Neo4jNodeExtractor / Neo4jRelationshipExtractor extract_records
 
 
 @pytest.mark.asyncio
-async def test_node_shard_extractor_extract_records(mocker, empty_schema):
+async def test_node_extractor_extract_records(mocker, basic_schema):
     connection = mocker.AsyncMock(Neo4jDatabaseConnection)
     fakeNode = FakeNeo4jNode(("Person",), {"name": "Bob"})
     connection.execute = AsyncMock(return_value=[{"n": fakeNode}])
-    extractor = Neo4jNodeShardExtractor(
+    extractor = Neo4jNodeExtractor(
         connection=connection,
         statement="MATCH (n:Person) SKIP $shard_offset LIMIT $shard_limit RETURN n",
         params={"shard_offset": 0, "shard_limit": 10},
         nodeType="Person",
-        schema=empty_schema,
+        schema=basic_schema,
     )
     results = [record async for record in extractor.extract_records()]
     assert_that(results, has_length(1))
@@ -469,7 +545,23 @@ async def test_node_shard_extractor_extract_records(mocker, empty_schema):
 
 
 @pytest.mark.asyncio
-async def test_relationship_shard_extractor_extract_records(mocker, empty_schema):
+async def test_node_extractor_skips_record_for_unknown_type(mocker, basic_schema):
+    connection = mocker.AsyncMock(Neo4jDatabaseConnection)
+    fakeNode = FakeNeo4jNode(("UnknownType",), {"x": 1})
+    connection.execute = AsyncMock(return_value=[{"n": fakeNode}])
+    extractor = Neo4jNodeExtractor(
+        connection=connection,
+        statement="MATCH (n:UnknownType) RETURN n",
+        params={"shard_offset": 0, "shard_limit": 10},
+        nodeType="UnknownType",
+        schema=basic_schema,
+    )
+    results = [record async for record in extractor.extract_records()]
+    assert_that(results, has_length(0))
+
+
+@pytest.mark.asyncio
+async def test_relationship_extractor_extract_records(mocker, basic_schema):
     connection = mocker.AsyncMock(Neo4jDatabaseConnection)
     fakeFromNode = FakeNeo4jNode(("Person",), {"name": "Alice"})
     fakeToNode = FakeNeo4jNode(("Person",), {"name": "Bob"})
@@ -477,19 +569,43 @@ async def test_relationship_shard_extractor_extract_records(mocker, empty_schema
     connection.execute = AsyncMock(
         return_value=[{"a": fakeFromNode, "r": fakeRel, "b": fakeToNode}]
     )
-    extractor = Neo4jRelationshipShardExtractor(
+    extractor = Neo4jRelationshipExtractor(
         connection=connection,
         statement="MATCH (a:Person)-[r:BEST_FRIEND_OF]->(b:Person) SKIP $shard_offset LIMIT $shard_limit RETURN a, r, b",
         params={"shard_offset": 0, "shard_limit": 10},
         fromNodeType="Person",
         toNodeType="Person",
         relationshipType="BEST_FRIEND_OF",
-        schema=empty_schema,
+        schema=basic_schema,
     )
     results = [record async for record in extractor.extract_records()]
     assert_that(results, has_length(1))
     call_kwargs = connection.execute.call_args
     assert call_kwargs.kwargs.get("routing_") == RoutingControl.READ
+
+
+@pytest.mark.asyncio
+async def test_relationship_extractor_skips_record_when_endpoint_type_unknown(
+    mocker, basic_schema
+):
+    connection = mocker.AsyncMock(Neo4jDatabaseConnection)
+    fakeFromNode = FakeNeo4jNode(("Person",), {"name": "Alice"})
+    fakeToNode = FakeNeo4jNode(("UnknownType",), {"x": 1})
+    fakeRel = FakeNeo4jRel("BEST_FRIEND_OF", {"since": 2020})
+    connection.execute = AsyncMock(
+        return_value=[{"a": fakeFromNode, "r": fakeRel, "b": fakeToNode}]
+    )
+    extractor = Neo4jRelationshipExtractor(
+        connection=connection,
+        statement="MATCH (a:Person)-[r:BEST_FRIEND_OF]->(b:UnknownType) RETURN a, r, b",
+        params={"shard_offset": 0, "shard_limit": 10},
+        fromNodeType="Person",
+        toNodeType="UnknownType",
+        relationshipType="BEST_FRIEND_OF",
+        schema=basic_schema,
+    )
+    results = [record async for record in extractor.extract_records()]
+    assert_that(results, has_length(0))
 
 
 # -- RoundRobinDistribution --------------------------------------------------
@@ -551,10 +667,20 @@ def test_snapshot_cutoff_with_latest_hours(mocker):
     conn = mocker.Mock(Neo4jDatabaseConnection)
     retriever = Neo4jTypeRetriever(conn, Schema(), shard_size=1000, latest_hours=6)
     cutoff = retriever.snapshotCutoff()
-    assert cutoff is not None
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc)
     delta = now - cutoff
     # Should be ~6 hours (allow 5s drift)
     assert abs(delta.total_seconds() - 6 * 3600) < 5
+
+
+def test_snapshot_cutoff_without_latest_hours_returns_now(mocker):
+    conn = mocker.Mock(Neo4jDatabaseConnection)
+    retriever = Neo4jTypeRetriever(conn, Schema(), shard_size=1000)
+    cutoff = retriever.snapshotCutoff()
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    # Should be within 1 second of now
+    assert abs((now - cutoff).total_seconds()) < 1

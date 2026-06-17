@@ -3,6 +3,7 @@ import math
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from itertools import zip_longest
+from logging import getLogger
 from typing import AsyncGenerator, List, Optional, Tuple
 
 from neo4j import RoutingControl
@@ -14,11 +15,12 @@ from nodestream.model import Node, PropertySet, Relationship, RelationshipWithNo
 from nodestream.pipeline import Extractor
 from nodestream.schema import Schema
 
-from .extractor import Neo4jExtractor
 from .neo4j_database import Neo4jDatabaseConnection
 from .query import Query
 
 LAST_INGESTED_AT_PROPERTY = "last_ingested_at"
+
+logger = getLogger(__name__)
 
 FETCH_ALL_NODES_BY_TYPE_QUERY_FORMAT = """\
 MATCH (n:{type})
@@ -42,11 +44,6 @@ MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
 RETURN a, r, b
 """
 
-FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT = """\
-MATCH (n:{type})
-{where}WITH n ORDER BY elementId(n) SKIP $shard_offset LIMIT $shard_limit
-RETURN n
-"""
 
 FETCH_RELATIONSHIPS_SHARD_ELEMENTID_QUERY_FORMAT = """\
 MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
@@ -73,14 +70,16 @@ MATCH ()-[r:{relationship_type}]->()
 
 def map_neo4j_node_to_nodestream_node(
     node: Neo4jNode, nodeType: str, schema: Schema
-) -> Node:
+) -> Node | None:
+    if not schema.has_node_of_type(nodeType):
+        logger.warning("Node type %r not found in schema — skipping record", nodeType)
+        return None
+    nodeSchema = schema.get_node_type_by_name(nodeType)
     properties = PropertySet(node)
     keyValues = PropertySet.empty()
-    nodeSchema = schema.get_node_type_by_name(nodeType)
-    if nodeSchema is not None:
-        for keyName in nodeSchema.keys:
-            if keyName in properties:
-                keyValues[keyName] = properties.pop(keyName)
+    for keyName in nodeSchema.keys:
+        if keyName in properties:
+            keyValues[keyName] = properties.pop(keyName)
     additionalTypes: Tuple[str, ...] = tuple(
         label for label in node.labels if label != nodeType
     )
@@ -102,71 +101,18 @@ def map_neo4j_relationship_to_nodestream_relationship(
 
 
 # ---------------------------------------------------------------------------
-# Typed extractor subclasses
+# Typed extractor subclasses — shard-first design
 # ---------------------------------------------------------------------------
 
 
-class Neo4jNodeExtractor(Neo4jExtractor):
-    """Paginates a node query and maps each record to a node ingest object."""
+class Neo4jNodeExtractor(Extractor):
+    """Executes a single pre-bounded node shard query and maps each record.
 
-    def __init__(
-        self,
-        query: str,
-        databaseConnection: Neo4jDatabaseConnection,
-        nodeType: str,
-        schema: Schema,
-        parameters=None,
-        limit: int = 100,
-    ) -> None:
-        super().__init__(query, databaseConnection, parameters, limit)
-        self.nodeType = nodeType
-        self.schema = schema
-
-    async def extract_records(self) -> AsyncGenerator:
-        async for record in super().extract_records():
-            yield map_neo4j_node_to_nodestream_node(
-                record.original["n"], nodeType=self.nodeType, schema=self.schema
-            ).into_ingest()
-
-
-class Neo4jRelationshipExtractor(Neo4jExtractor):
-    """Paginates a relationship query and maps each record to a RelationshipWithNodes ingest object."""
-
-    def __init__(
-        self,
-        query: str,
-        databaseConnection: Neo4jDatabaseConnection,
-        fromNodeType: str,
-        toNodeType: str,
-        relationshipType: str,
-        schema: Schema,
-        parameters=None,
-        limit: int = 100,
-    ) -> None:
-        super().__init__(query, databaseConnection, parameters, limit)
-        self.fromNodeType = fromNodeType
-        self.toNodeType = toNodeType
-        self.relationshipType = relationshipType
-        self.schema = schema
-
-    async def extract_records(self) -> AsyncGenerator:
-        async for record in super().extract_records():
-            rawRecord = record.original
-            yield RelationshipWithNodes(
-                from_node=map_neo4j_node_to_nodestream_node(
-                    rawRecord["a"], nodeType=self.fromNodeType, schema=self.schema
-                ),
-                to_node=map_neo4j_node_to_nodestream_node(
-                    rawRecord["b"], nodeType=self.toNodeType, schema=self.schema
-                ),
-                relationship=map_neo4j_relationship_to_nodestream_relationship(
-                    rawRecord["r"], relationshipType=self.relationshipType
-                ),
-            ).into_ingest()
-
-
-class Neo4jNodeShardExtractor(Extractor):
-    """Executes a single pre-bounded node shard query and maps each record."""
+    The caller is responsible for supplying the Cypher statement and a params
+    dict that includes ``shard_offset`` and ``shard_limit`` (plus any filter
+    parameters such as ``cutoff``).  Records whose node type is absent from the
+    schema are silently skipped with a warning.
+    """
 
     def __init__(
         self,
@@ -187,13 +133,21 @@ class Neo4jNodeShardExtractor(Extractor):
             Query(self.statement, self.params), routing_=RoutingControl.READ
         )
         for record in results:
-            yield map_neo4j_node_to_nodestream_node(
+            node = map_neo4j_node_to_nodestream_node(
                 record["n"], nodeType=self.nodeType, schema=self.schema
-            ).into_ingest()
+            )
+            if node is not None:
+                yield node.into_ingest()
 
 
-class Neo4jRelationshipShardExtractor(Extractor):
-    """Executes a single pre-bounded relationship shard query and maps each record."""
+class Neo4jRelationshipExtractor(Extractor):
+    """Executes a single pre-bounded relationship shard query and maps each record.
+
+    The caller is responsible for supplying the Cypher statement and a params
+    dict that includes ``shard_offset`` and ``shard_limit`` (plus any filter
+    parameters such as ``cutoff``).  Records where either endpoint node type is
+    absent from the schema are silently skipped with a warning.
+    """
 
     def __init__(
         self,
@@ -218,17 +172,20 @@ class Neo4jRelationshipShardExtractor(Extractor):
             Query(self.statement, self.params), routing_=RoutingControl.READ
         )
         for record in results:
-            yield RelationshipWithNodes(
-                from_node=map_neo4j_node_to_nodestream_node(
-                    record["a"], nodeType=self.fromNodeType, schema=self.schema
-                ),
-                to_node=map_neo4j_node_to_nodestream_node(
-                    record["b"], nodeType=self.toNodeType, schema=self.schema
-                ),
-                relationship=map_neo4j_relationship_to_nodestream_relationship(
-                    record["r"], relationshipType=self.relationshipType
-                ),
-            ).into_ingest()
+            fromNode = map_neo4j_node_to_nodestream_node(
+                record["a"], nodeType=self.fromNodeType, schema=self.schema
+            )
+            toNode = map_neo4j_node_to_nodestream_node(
+                record["b"], nodeType=self.toNodeType, schema=self.schema
+            )
+            if fromNode is not None and toNode is not None:
+                yield RelationshipWithNodes(
+                    from_node=fromNode,
+                    to_node=toNode,
+                    relationship=map_neo4j_relationship_to_nodestream_relationship(
+                        record["r"], relationshipType=self.relationshipType
+                    ),
+                ).into_ingest()
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +258,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         self.latest_hours = latest_hours
         self.preload_nodes = preload_nodes
         self.histogram: TypeHistogram = TypeHistogram()
+        self.cutoff: datetime = datetime.now(timezone.utc)
         self.distributionStrategy: DistributionStrategy = DISTRIBUTION_STRATEGIES.get(
             distribution, SequentialDistribution
         )()
@@ -316,7 +274,7 @@ class Neo4jTypeRetriever(TypeRetriever):
 
     async def fetchNodeExtractors(self) -> AsyncGenerator[Extractor, None]:
         schema = self.schema
-        cutoff = self.snapshotCutoff()
+        cutoff = self.cutoff
         nodeCounts = self.histogram.node_counts
         extractorsByType = [
             [
@@ -340,7 +298,7 @@ class Neo4jTypeRetriever(TypeRetriever):
 
     async def fetchRelationshipExtractors(self) -> AsyncGenerator[Extractor, None]:
         schema = self.schema
-        cutoff = self.snapshotCutoff()
+        cutoff = self.cutoff
         relationshipCounts = self.histogram.relationship_counts
 
         # Build (relationshipType, adjacencies) pairs, skipping types with no adjacencies.
@@ -380,25 +338,11 @@ class Neo4jTypeRetriever(TypeRetriever):
         async for extractor in self.distributionStrategy.distribute(extractorsByType):
             yield extractor
 
-    # -- Mapping helpers (kept as methods for existing test coverage) -----------
-
-    def map_neo4j_node_to_nodestream_node(
-        self, node: Neo4jNode, node_type: str, schema: Schema
-    ) -> Node:
-        return map_neo4j_node_to_nodestream_node(
-            node, nodeType=node_type, schema=schema
-        )
-
-    def map_neo4j_relationship_to_nodestream_relationship(
-        self, relationship: Neo4jRelationship, relationship_type: str
-    ) -> Relationship:
-        return map_neo4j_relationship_to_nodestream_relationship(
-            relationship, relationshipType=relationship_type
-        )
-
     # -- Shard params helper ----------------------------------------------------
 
-    def buildShardParameters(self, cutoff, shardOffset: int, shardLimit: int) -> dict:
+    def buildShardParameters(
+        self, cutoff: datetime, shardOffset: int, shardLimit: int
+    ) -> dict:
         return dict(
             self.build_filter_parameters(cutoff),
             shard_offset=shardOffset,
@@ -410,23 +354,18 @@ class Neo4jTypeRetriever(TypeRetriever):
     def buildNodeShardExtractor(
         self,
         nodeType: str,
-        keyField: Optional[str],
+        keyField: str,
         shardOffset: int,
         shardLimit: int,
         schema: Schema,
-        cutoff: datetime | None = None,
-    ) -> Neo4jNodeShardExtractor:
+        cutoff: datetime,
+    ) -> Neo4jNodeExtractor:
         whereClause = self.build_where_clause("n")
-        if keyField:
-            statement = FETCH_NODES_SHARD_QUERY_FORMAT.format(
-                type=nodeType, where=whereClause, key_field=keyField
-            )
-        else:
-            statement = FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT.format(
-                type=nodeType, where=whereClause
-            )
+        statement = FETCH_NODES_SHARD_QUERY_FORMAT.format(
+            type=nodeType, where=whereClause, key_field=keyField
+        )
         params = self.buildShardParameters(cutoff, shardOffset, shardLimit)
-        return Neo4jNodeShardExtractor(
+        return Neo4jNodeExtractor(
             self.database_connection,
             statement,
             params,
@@ -443,8 +382,8 @@ class Neo4jTypeRetriever(TypeRetriever):
         shardOffset: int,
         shardLimit: int,
         schema: Schema,
-        cutoff: datetime | None = None,
-    ) -> Neo4jRelationshipShardExtractor:
+        cutoff: datetime,
+    ) -> Neo4jRelationshipExtractor:
         whereClause = self.build_where_clause("r", sample=True)
         if keyField:
             statement = FETCH_RELATIONSHIPS_SHARD_QUERY_FORMAT.format(
@@ -462,7 +401,7 @@ class Neo4jTypeRetriever(TypeRetriever):
                 where=whereClause,
             )
         params = self.buildShardParameters(cutoff, shardOffset, shardLimit)
-        return Neo4jRelationshipShardExtractor(
+        return Neo4jRelationshipExtractor(
             self.database_connection,
             statement,
             params,
@@ -486,20 +425,12 @@ class Neo4jTypeRetriever(TypeRetriever):
             return ""
         return "WHERE " + " AND ".join(clauses) + "\n"
 
-    def build_filter_parameters(
-        self, cutoff: datetime | None = None
-    ) -> dict[str, object]:
-        if self.latest_hours is None:
-            return {}
-        if cutoff is None:
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=self.latest_hours)
+    def build_filter_parameters(self, cutoff: datetime) -> dict[str, object]:
         return {"cutoff": cutoff}
 
     # -- Count helpers ----------------------------------------------------------
 
-    async def preview_node_count(
-        self, node_type: str, cutoff: datetime | None = None
-    ) -> int:
+    async def preview_node_count(self, node_type: str, cutoff: datetime) -> int:
         whereClause = self.build_where_clause("n")
         statement = COUNT_NODES_BY_TYPE_QUERY_FORMAT.format(
             type=node_type, where=whereClause
@@ -512,7 +443,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         return int(firstResult["count"]) if firstResult is not None else 0
 
     async def preview_relationship_count(
-        self, relationship_type: str, cutoff: datetime | None = None
+        self, relationship_type: str, cutoff: datetime
     ) -> int:
         whereClause = self.build_where_clause("r", sample=True)
         statement = COUNT_RELATIONSHIPS_BY_TYPE_QUERY_FORMAT.format(
@@ -525,21 +456,23 @@ class Neo4jTypeRetriever(TypeRetriever):
         firstResult = next(iter(results), None)
         return int(firstResult["count"]) if firstResult is not None else 0
 
-    async def gatherCounts(self, types, countFunction, cutoff) -> dict:
+    async def gatherCounts(self, types, countFunction, cutoff: datetime) -> dict:
         counts = await asyncio.gather(
             *(countFunction(typeName, cutoff=cutoff) for typeName in types)
         )
         return dict(zip(types, counts))
 
     async def build_histogram(self) -> TypeHistogram:
-        cutoff = self.snapshotCutoff()
+        self.cutoff = self.snapshotCutoff()
         nodeTypes = [nodeType.name for nodeType in self.schema.nodes]
         relationshipTypes = [
             relationshipType.name for relationshipType in self.schema.relationships
         ]
-        nodeCounts = await self.gatherCounts(nodeTypes, self.preview_node_count, cutoff)
+        nodeCounts = await self.gatherCounts(
+            nodeTypes, self.preview_node_count, self.cutoff
+        )
         relationshipCounts = await self.gatherCounts(
-            relationshipTypes, self.preview_relationship_count, cutoff
+            relationshipTypes, self.preview_relationship_count, self.cutoff
         )
         self.histogram = TypeHistogram(
             node_counts=nodeCounts, relationship_counts=relationshipCounts
@@ -558,18 +491,36 @@ class Neo4jTypeRetriever(TypeRetriever):
             for shardIndex in range(numberOfShards)
         ]
 
-    def snapshotCutoff(self) -> datetime | None:
-        if self.latest_hours is None:
-            return None
-        return datetime.now(timezone.utc) - timedelta(hours=self.latest_hours)
+    def snapshotCutoff(self) -> datetime:
+        """Return the snapshot upper bound for this run.
 
-    def key_field_for_node_type(self, node_type: str, schema: Schema) -> Optional[str]:
+        When ``latest_hours`` is set the cutoff is pushed back by that many
+        hours so only recently-ingested records are included.  When it is not
+        set the cutoff is simply *now*, acting as a guaranteed upper-bound
+        anchor so no records ingested after the run started can slip in.
+        """
+        now = datetime.now(timezone.utc)
+        if self.latest_hours is not None:
+            return now - timedelta(hours=self.latest_hours)
+        return now
+
+    def key_field_for_node_type(self, node_type: str, schema: Schema) -> str:
+        """Return the field to ORDER BY when paginating nodes.
+
+        Priority:
+        1. ``last_ingested_at`` when recency filtering is active — keeps ordering
+           consistent with the WHERE clause filter.
+        2. The first declared schema key for the node type — stable, meaningful
+           order derived from the data model.
+        3. ``last_ingested_at`` as a universal fallback — every ingested node
+           carries this property, so it is always safe to order by.
+        """
         if self.latest_hours is not None:
             return LAST_INGESTED_AT_PROPERTY
         nodeSchema = schema.get_node_type_by_name(node_type)
         if nodeSchema and nodeSchema.keys:
             return next(iter(nodeSchema.keys))
-        return None
+        return LAST_INGESTED_AT_PROPERTY
 
     def key_field_for_relationship_type(
         self, relationship_type: str, schema: Schema
