@@ -200,22 +200,22 @@ def test_build_node_extractor_with_key_field(subject, empty_schema):
     assert extractor.nodeType == "Person"
 
 
-def test_build_node_extractor_uses_last_ingested_at_fallback(subject, empty_schema):
-    """When key_field_for_node_type returns LAST_INGESTED_AT_PROPERTY for a type
-    with no schema keys, the builder still produces a valid ORDER BY clause."""
+def test_build_node_extractor_without_key_field_uses_element_id(subject, empty_schema):
+    """When key_field_for_node_type returns None (no schema key, no latest_hours),
+    the builder falls back to elementId ordering — safe for non-nodestream graphs."""
     from datetime import datetime, timezone
 
     cutoff = datetime.now(timezone.utc)
     extractor = subject.buildNodeShardExtractor(
         "Person",
-        LAST_INGESTED_AT_PROPERTY,
+        None,
         500,
         500,
         schema=empty_schema,
         cutoff=cutoff,
     )
     assert isinstance(extractor, Neo4jNodeExtractor)
-    assert f"ORDER BY n.`{LAST_INGESTED_AT_PROPERTY}`" in extractor.statement
+    assert "ORDER BY elementId(n)" in extractor.statement
     assert extractor.params["shard_offset"] == 500
     assert extractor.params["shard_limit"] == 500
 
@@ -412,26 +412,16 @@ def test_key_field_for_node_type_from_schema_keys(basic_schema, mocker):
     assert retriever.key_field_for_node_type("Person", basic_schema) == "name"
 
 
-def test_key_field_for_node_type_no_schema_keys_falls_back_to_last_ingested_at(
-    basic_schema, mocker
-):
+def test_key_field_for_node_type_no_schema_keys_returns_none(basic_schema, mocker):
     connection = mocker.Mock()
     retriever = Neo4jTypeRetriever(connection, basic_schema, shard_size=1000)
-    assert (
-        retriever.key_field_for_node_type("Organization", basic_schema)
-        == LAST_INGESTED_AT_PROPERTY
-    )
+    assert retriever.key_field_for_node_type("Organization", basic_schema) is None
 
 
-def test_key_field_for_node_type_unknown_type_falls_back_to_last_ingested_at(
-    basic_schema, mocker
-):
+def test_key_field_for_node_type_unknown_type_returns_none(basic_schema, mocker):
     connection = mocker.Mock()
     retriever = Neo4jTypeRetriever(connection, basic_schema, shard_size=1000)
-    assert (
-        retriever.key_field_for_node_type("Ghost", basic_schema)
-        == LAST_INGESTED_AT_PROPERTY
-    )
+    assert retriever.key_field_for_node_type("Ghost", basic_schema) is None
 
 
 def test_key_field_for_relationship_type_with_latest_hours(basic_schema, mocker):

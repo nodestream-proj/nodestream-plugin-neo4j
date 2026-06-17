@@ -45,6 +45,12 @@ RETURN a, r, b
 """
 
 
+FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT = """\
+MATCH (n:{type})
+{where}WITH n ORDER BY elementId(n) SKIP $shard_offset LIMIT $shard_limit
+RETURN n
+"""
+
 FETCH_RELATIONSHIPS_SHARD_ELEMENTID_QUERY_FORMAT = """\
 MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
 {where}WITH a, r, b ORDER BY elementId(r) SKIP $shard_offset LIMIT $shard_limit
@@ -354,16 +360,21 @@ class Neo4jTypeRetriever(TypeRetriever):
     def buildNodeShardExtractor(
         self,
         nodeType: str,
-        keyField: str,
+        keyField: Optional[str],
         shardOffset: int,
         shardLimit: int,
         schema: Schema,
         cutoff: datetime,
     ) -> Neo4jNodeExtractor:
         whereClause = self.build_where_clause("n")
-        statement = FETCH_NODES_SHARD_QUERY_FORMAT.format(
-            type=nodeType, where=whereClause, key_field=keyField
-        )
+        if keyField:
+            statement = FETCH_NODES_SHARD_QUERY_FORMAT.format(
+                type=nodeType, where=whereClause, key_field=keyField
+            )
+        else:
+            statement = FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT.format(
+                type=nodeType, where=whereClause
+            )
         params = self.buildShardParameters(cutoff, shardOffset, shardLimit)
         return Neo4jNodeExtractor(
             self.database_connection,
@@ -504,23 +515,23 @@ class Neo4jTypeRetriever(TypeRetriever):
             return now - timedelta(hours=self.latest_hours)
         return now
 
-    def key_field_for_node_type(self, node_type: str, schema: Schema) -> str:
-        """Return the field to ORDER BY when paginating nodes.
+    def key_field_for_node_type(self, node_type: str, schema: Schema) -> Optional[str]:
+        """Return the field to ORDER BY when paginating nodes, or None for elementId.
 
         Priority:
         1. ``last_ingested_at`` when recency filtering is active — keeps ordering
            consistent with the WHERE clause filter.
-        2. The first declared schema key for the node type — stable, meaningful
-           order derived from the data model.
-        3. ``last_ingested_at`` as a universal fallback — every ingested node
-           carries this property, so it is always safe to order by.
+        2. The first declared schema key — if a key is specified in the schema it
+           is assumed to exist in the source graph, even for non-nodestream graphs.
+        3. None → caller falls back to elementId(n), which is always present on
+           any Neo4j graph regardless of origin.
         """
         if self.latest_hours is not None:
             return LAST_INGESTED_AT_PROPERTY
         nodeSchema = schema.get_node_type_by_name(node_type)
         if nodeSchema and nodeSchema.keys:
             return next(iter(nodeSchema.keys))
-        return LAST_INGESTED_AT_PROPERTY
+        return None
 
     def key_field_for_relationship_type(
         self, relationship_type: str, schema: Schema
