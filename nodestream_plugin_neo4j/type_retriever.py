@@ -203,10 +203,6 @@ class Neo4jTypeRetriever(TypeRetriever):
             async for extractor in self._fetch_rel_extractors():
                 yield extractor
 
-    # Keep the old name as an alias so the abstract base (which still uses
-    # fetchExtractors) continues to work without modification.
-    fetchExtractors = fetch_extractors
-
     async def _fetch_node_extractors(self) -> AsyncGenerator[Extractor, None]:
         schema = self.schema
         cutoff = self._snapshot_cutoff()
@@ -387,15 +383,6 @@ class Neo4jTypeRetriever(TypeRetriever):
             lambda record, nt=node_type: self._node_ingest_mapper(record, nt, schema),
         )
 
-    # Keep old public name as alias for test backwards compatibility.
-    def buildNodeExtractor(
-        self,
-        node_type: str,
-        schema: Schema | None = None,
-        cutoff: datetime | None = None,
-    ) -> Extractor:
-        return self._build_node_extractor(node_type, schema=schema, cutoff=cutoff)
-
     def _build_node_shard_extractor(
         self,
         node_type: str,
@@ -424,25 +411,6 @@ class Neo4jTypeRetriever(TypeRetriever):
             ),
         )
 
-    # Keep old public name as alias for test backwards compatibility.
-    def buildNodeShardExtractor(
-        self,
-        node_type: str,
-        key_field: Optional[str],
-        shard_offset: int,
-        shard_limit: int,
-        schema: Schema | None = None,
-        cutoff: datetime | None = None,
-    ) -> Extractor:
-        return self._build_node_shard_extractor(
-            node_type,
-            key_field,
-            shard_offset,
-            shard_limit,
-            schema=schema,
-            cutoff=cutoff,
-        )
-
     def _build_rel_extractor(
         self,
         from_node_type: str,
@@ -468,23 +436,6 @@ class Neo4jTypeRetriever(TypeRetriever):
             lambda record, fnt=from_node_type, tnt=to_node_type, rt=relationship_type: self._rel_ingest_mapper(
                 record, fnt, tnt, rt, schema
             ),
-        )
-
-    # Keep old public name as alias for test backwards compatibility.
-    def buildRelExtractor(
-        self,
-        from_node_type: str,
-        to_node_type: str,
-        relationship_type: str,
-        schema: Schema | None = None,
-        cutoff: datetime | None = None,
-    ) -> Extractor:
-        return self._build_rel_extractor(
-            from_node_type,
-            to_node_type,
-            relationship_type,
-            schema=schema,
-            cutoff=cutoff,
         )
 
     def _build_rel_shard_extractor(
@@ -522,29 +473,6 @@ class Neo4jTypeRetriever(TypeRetriever):
             lambda record, fnt=from_node_type, tnt=to_node_type, rt=relationship_type: self._rel_ingest_mapper(
                 record, fnt, tnt, rt, schema, from_shard=True
             ),
-        )
-
-    # Keep old public name as alias for test backwards compatibility.
-    def buildRelShardExtractor(
-        self,
-        from_node_type: str,
-        to_node_type: str,
-        relationship_type: str,
-        key_field: Optional[str],
-        shard_offset: int,
-        shard_limit: int,
-        schema: Schema | None = None,
-        cutoff: datetime | None = None,
-    ) -> Extractor:
-        return self._build_rel_shard_extractor(
-            from_node_type,
-            to_node_type,
-            relationship_type,
-            key_field,
-            shard_offset,
-            shard_limit,
-            schema=schema,
-            cutoff=cutoff,
         )
 
     # -- Query builders ---------------------------------------------------------
@@ -625,20 +553,10 @@ class Neo4jTypeRetriever(TypeRetriever):
             for i in range(num_shards)
         ]
 
-    # Keep old public name as alias for test backwards compatibility.
-    def compute_shards(
-        self, total_count: int, shard_size: int
-    ) -> List[Tuple[int, int]]:
-        return self._compute_shards(total_count, shard_size)
-
     def _snapshot_cutoff(self) -> datetime | None:
         if self.latest_hours is None:
             return None
         return datetime.now(timezone.utc) - timedelta(hours=self.latest_hours)
-
-    # Keep old public name as alias for test backwards compatibility.
-    def snapshotCutoff(self) -> datetime | None:
-        return self._snapshot_cutoff()
 
     def key_field_for_node_type(self, node_type: str, schema: Schema) -> Optional[str]:
         if self.latest_hours is not None:
