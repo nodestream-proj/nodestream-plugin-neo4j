@@ -75,19 +75,17 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
 
     def make_type_retriever(self, **kwargs) -> TypeRetriever:
         schema = kwargs.pop("schema")
-        limit: int = kwargs.pop("limit", 1000)
-        sample_ratio: int | None = kwargs.pop("sample_ratio", None)
-        latest_hours: int | None = kwargs.pop("latest_hours", None)
-        node_only: bool = kwargs.pop("node_only", False)
-        shard_size: int | None = kwargs.pop("shard_size", None)
+        shardSize: int = kwargs.pop("shard_size", 10000)
+        sampleRatio: int | None = kwargs.pop("sample_ratio", None)
+        latestHours: int | None = kwargs.pop("latest_hours", None)
+        preloadNodes: bool = kwargs.pop("preload_nodes", False)
         return Neo4jTypeRetriever(
             self.database_connection,
             schema,
-            limit,
-            sample_ratio=sample_ratio,
-            latest_hours=latest_hours,
-            node_only=node_only,
-            shard_size=shard_size,
+            shardSize,
+            sample_ratio=sampleRatio,
+            latest_hours=latestHours,
+            preload_nodes=preloadNodes,
         )
 
     def make_migrator(self) -> Migrator:

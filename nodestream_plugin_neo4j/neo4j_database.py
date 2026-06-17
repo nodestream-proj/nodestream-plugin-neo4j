@@ -34,8 +34,8 @@ from .query import Query
 from .result import Neo4jQueryStatistics, Neo4jResult
 
 RETRYABLE_EXCEPTIONS = tuple(
-    e
-    for e in (
+    exceptionType
+    for exceptionType in (
         TransientError,
         ServiceUnavailable,
         SessionExpired,
@@ -43,7 +43,7 @@ RETRYABLE_EXCEPTIONS = tuple(
         AuthError,
         ConnectionAcquisitionTimeoutError,
     )
-    if e is not None
+    if exceptionType is not None
 )
 AUTH_RATE_LIMIT_CODE = "Neo.ClientError.Security.AuthenticationRateLimit"
 

@@ -27,7 +27,7 @@ def test_make_type_retriever_defaults(mocker):
     retriever = connector.make_type_retriever(schema=Schema())
     assert isinstance(retriever, Neo4jTypeRetriever)
     assert_that(retriever.database_connection, equal_to(connector.database_connection))
-    assert_that(retriever.limit, equal_to(1000))
+    assert_that(retriever.shard_size, equal_to(10000))
     assert_that(retriever.sample_ratio, equal_to(None))
     assert_that(retriever.latest_hours, equal_to(None))
 
@@ -40,13 +40,13 @@ def test_make_type_retriever_with_filters(mocker):
     )
     retriever = connector.make_type_retriever(
         schema=Schema(),
-        limit=500,
+        shard_size=5000,
         sample_ratio=3,
         latest_hours=24,
     )
     assert isinstance(retriever, Neo4jTypeRetriever)
     assert_that(retriever.database_connection, equal_to(connector.database_connection))
-    assert_that(retriever.limit, equal_to(500))
+    assert_that(retriever.shard_size, equal_to(5000))
     assert_that(retriever.sample_ratio, equal_to(3))
     assert_that(retriever.latest_hours, equal_to(24))
 
