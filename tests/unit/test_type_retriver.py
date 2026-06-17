@@ -171,14 +171,14 @@ def test_sample_ratio_of_one_is_ignored(mocker):
 
 
 def test_build_node_extractor_query(subject):
-    extractor = subject._build_node_extractor("Person")
+    extractor = subject.buildNodeExtractor("Person")
     assert isinstance(extractor, Neo4jMappingExtractor)
     assert "MATCH (n:Person)" in extractor.inner.query
     assert "SKIP $offset LIMIT $limit" in extractor.inner.query
 
 
 def test_build_node_extractor_with_filters(filtered_subject):
-    extractor = filtered_subject._build_node_extractor("Person")
+    extractor = filtered_subject.buildNodeExtractor("Person")
     assert isinstance(extractor, Neo4jMappingExtractor)
     assert "WHERE" in extractor.inner.query
     assert_that(extractor.inner.limit, equal_to(500))
@@ -186,14 +186,16 @@ def test_build_node_extractor_with_filters(filtered_subject):
 
 
 def test_build_rel_extractor_query(subject):
-    extractor = subject._build_rel_extractor("Person", "Company", "KNOWS")
+    extractor = subject.buildRelationshipExtractor("Person", "Company", "KNOWS")
     assert isinstance(extractor, Neo4jMappingExtractor)
     assert "MATCH (a:Person)-[r:KNOWS]->(b:Company)" in extractor.inner.query
     assert "SKIP $offset LIMIT $limit" in extractor.inner.query
 
 
 def test_build_rel_extractor_with_filters(filtered_subject):
-    extractor = filtered_subject._build_rel_extractor("Person", "Company", "KNOWS")
+    extractor = filtered_subject.buildRelationshipExtractor(
+        "Person", "Company", "KNOWS"
+    )
     assert isinstance(extractor, Neo4jMappingExtractor)
     assert "WHERE" in extractor.inner.query
     assert_that(extractor.inner.limit, equal_to(500))
@@ -201,7 +203,7 @@ def test_build_rel_extractor_with_filters(filtered_subject):
 
 
 def test_build_node_shard_extractor_with_key_field(subject):
-    extractor = subject._build_node_shard_extractor("Person", "name", 0, 1000)
+    extractor = subject.buildNodeShardExtractor("Person", "name", 0, 1000)
     assert isinstance(extractor, Neo4jShardExtractor)
     assert "ORDER BY n.`name`" in extractor.statement
     assert extractor.params["shard_offset"] == 0
@@ -209,7 +211,7 @@ def test_build_node_shard_extractor_with_key_field(subject):
 
 
 def test_build_node_shard_extractor_without_key_field(subject):
-    extractor = subject._build_node_shard_extractor("Person", None, 500, 500)
+    extractor = subject.buildNodeShardExtractor("Person", None, 500, 500)
     assert isinstance(extractor, Neo4jShardExtractor)
     assert "ORDER BY elementId(n)" in extractor.statement
     assert extractor.params["shard_offset"] == 500
@@ -217,7 +219,7 @@ def test_build_node_shard_extractor_without_key_field(subject):
 
 
 def test_build_rel_shard_extractor_with_key_field(subject):
-    extractor = subject._build_rel_shard_extractor(
+    extractor = subject.buildRelationshipShardExtractor(
         "Person", "Person", "BEST_FRIEND_OF", "since", 0, 2000
     )
     assert isinstance(extractor, Neo4jShardExtractor)
@@ -227,7 +229,7 @@ def test_build_rel_shard_extractor_with_key_field(subject):
 
 
 def test_build_rel_shard_extractor_without_key_field(subject):
-    extractor = subject._build_rel_shard_extractor(
+    extractor = subject.buildRelationshipShardExtractor(
         "Person", "Person", "BEST_FRIEND_OF", None, 100, 900
     )
     assert isinstance(extractor, Neo4jShardExtractor)
@@ -336,15 +338,15 @@ def test_map_neo4j_node_to_nodestream_node_schema_unknown_type(subject, basic_sc
     assert len(result.key_values) == 0
 
 
-# -- _compute_shards ----------------------------------------------------------
+# -- computeShards ----------------------------------------------------------
 
 
-def test__compute_shards_zero_count_returns_empty(subject):
-    assert subject._compute_shards(0, 1000) == []
+def test_compute_shards_zero_count_returns_empty(subject):
+    assert subject.computeShards(0, 1000) == []
 
 
-def test__compute_shards_negative_shard_size_returns_empty(subject):
-    assert subject._compute_shards(5000, 0) == []
+def test_compute_shards_negative_shard_size_returns_empty(subject):
+    assert subject.computeShards(5000, 0) == []
 
 
 # -- key_field helpers -------------------------------------------------------
@@ -482,7 +484,7 @@ async def test_mapping_extractor_extract_records(mocker):
         return_value=async_generator(inner_record)
     )
     mapped = []
-    extractor = Neo4jMappingExtractor(inner_extractor, map_record=lambda r: r["n"])
+    extractor = Neo4jMappingExtractor(inner_extractor, mapRecord=lambda r: r["n"])
     async for record in extractor.extract_records():
         mapped.append(record)
     assert_that(mapped, has_length(1))
@@ -498,7 +500,7 @@ async def test_shard_extractor_extract_records(mocker):
         connection=connection,
         statement="MATCH (n:Person) SKIP $shard_offset LIMIT $shard_limit RETURN n",
         params={"shard_offset": 0, "shard_limit": 10},
-        map_record=lambda r: r["n"],
+        mapRecord=lambda r: r["n"],
     )
     results = []
     async for record in extractor.extract_records():
@@ -579,13 +581,13 @@ async def test_build_histogram_node_only_skips_rel_counts(mocker, basic_schema):
     retriever.preview_relationship_count.assert_not_called()
 
 
-# -- _snapshot_cutoff ----------------------------------------------------------
+# -- snapshotCutoff ----------------------------------------------------------
 
 
 def test_snapshot_cutoff_with_latest_hours(mocker):
     conn = mocker.Mock(Neo4jDatabaseConnection)
     retriever = Neo4jTypeRetriever(conn, Schema(), latest_hours=6)
-    cutoff = retriever._snapshot_cutoff()
+    cutoff = retriever.snapshotCutoff()
     assert cutoff is not None
     from datetime import datetime, timezone
 
