@@ -118,7 +118,7 @@ class DistributionStrategy(ABC):
     def distribute(
         self, extractorsByType: List[List[Extractor]]
     ) -> AsyncGenerator[Extractor, None]:
-        ...
+        ...  # pragma: no cover
 
 
 class SequentialDistribution(DistributionStrategy):

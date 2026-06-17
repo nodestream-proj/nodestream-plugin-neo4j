@@ -469,3 +469,127 @@ async def test_fetch_extractors_skips_unknown_rel_type(mocker, basic_schema):
     )
     extractors = [e async for e in retriever.fetchExtractors()]
     assert extractors == []
+
+
+# -- Neo4jMappingExtractor / Neo4jShardExtractor extract_records -------------
+
+
+@pytest.mark.asyncio
+async def test_mapping_extractor_extract_records(mocker):
+    inner_record = FakeRecord({"n": FakeNeo4jNode(("Person",), {"name": "Alice"})})
+    inner_extractor = mocker.AsyncMock()
+    inner_extractor.extract_records = mocker.MagicMock(
+        return_value=async_generator(inner_record)
+    )
+    mapped = []
+    extractor = Neo4jMappingExtractor(inner_extractor, mapRecord=lambda r: r["n"])
+    async for record in extractor.extract_records():
+        mapped.append(record)
+    assert_that(mapped, has_length(1))
+    assert mapped[0] == inner_record["n"]
+
+
+@pytest.mark.asyncio
+async def test_shard_extractor_extract_records(mocker):
+    connection = mocker.AsyncMock(Neo4jDatabaseConnection)
+    fake_node = FakeNeo4jNode(("Person",), {"name": "Bob"})
+    connection.execute = AsyncMock(return_value=[{"n": fake_node}])
+    extractor = Neo4jShardExtractor(
+        connection=connection,
+        statement="MATCH (n:Person) SKIP $shard_offset LIMIT $shard_limit RETURN n",
+        params={"shard_offset": 0, "shard_limit": 10},
+        mapRecord=lambda r: r["n"],
+    )
+    results = []
+    async for record in extractor.extract_records():
+        results.append(record)
+    assert_that(results, has_length(1))
+    assert results[0] == fake_node
+    call_kwargs = connection.execute.call_args
+    assert call_kwargs.kwargs.get("routing_") == RoutingControl.READ
+
+
+# -- RoundRobinDistribution --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_round_robin_distribution_interleaves_types(mocker, basic_schema):
+    conn = mocker.Mock(Neo4jDatabaseConnection)
+    retriever = Neo4jTypeRetriever(
+        conn,
+        basic_schema,
+        node_types=["Person", "Organization"],
+        node_only=True,
+        shard_size=1000,
+        distribution="round_robin",
+    )
+    retriever.preview_node_count = AsyncMock(side_effect=[2000, 1000])
+    extractors = [e async for e in retriever.fetchExtractors()]
+    # Person: 2 shards, Organization: 1 shard → 3 total, interleaved
+    assert_that(extractors, has_length(3))
+
+
+@pytest.mark.asyncio
+async def test_round_robin_distribution_unequal_shard_counts(mocker, basic_schema):
+    from nodestream_plugin_neo4j.type_retriever import RoundRobinDistribution
+
+    e1a = mocker.Mock()
+    e1b = mocker.Mock()
+    e2a = mocker.Mock()
+
+    distribution = RoundRobinDistribution()
+    result = [e async for e in distribution.distribute([[e1a, e1b], [e2a]])]
+    # Round-robin: e1a, e2a, e1b (sentinel skipped for second slot in round 2)
+    assert result == [e1a, e2a, e1b]
+
+
+# -- build_histogram ---------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_histogram_nodes_and_rels(mocker, basic_schema):
+    conn = mocker.Mock(Neo4jDatabaseConnection)
+    retriever = Neo4jTypeRetriever(
+        conn,
+        basic_schema,
+        node_types=["Person"],
+        relationship_types=["BEST_FRIEND_OF"],
+    )
+    retriever.preview_node_count = AsyncMock(return_value=42)
+    retriever.preview_relationship_count = AsyncMock(return_value=99)
+    histogram = await retriever.build_histogram()
+    assert histogram.node_counts == {"Person": 42}
+    assert histogram.relationship_counts == {"BEST_FRIEND_OF": 99}
+
+
+@pytest.mark.asyncio
+async def test_build_histogram_node_only_skips_rel_counts(mocker, basic_schema):
+    conn = mocker.Mock(Neo4jDatabaseConnection)
+    retriever = Neo4jTypeRetriever(
+        conn,
+        basic_schema,
+        node_types=["Person"],
+        node_only=True,
+    )
+    retriever.preview_node_count = AsyncMock(return_value=10)
+    retriever.preview_relationship_count = AsyncMock(return_value=999)
+    histogram = await retriever.build_histogram()
+    assert histogram.node_counts == {"Person": 10}
+    assert histogram.relationship_counts == {}
+    retriever.preview_relationship_count.assert_not_called()
+
+
+# -- snapshotCutoff ----------------------------------------------------------
+
+
+def test_snapshot_cutoff_with_latest_hours(mocker):
+    conn = mocker.Mock(Neo4jDatabaseConnection)
+    retriever = Neo4jTypeRetriever(conn, Schema(), latest_hours=6)
+    cutoff = retriever.snapshotCutoff()
+    assert cutoff is not None
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    delta = now - cutoff
+    # Should be ~6 hours (allow 5s drift)
+    assert abs(delta.total_seconds() - 6 * 3600) < 5
