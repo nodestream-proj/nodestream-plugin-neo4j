@@ -181,13 +181,14 @@ class Neo4jRelationshipExtractor(Extractor):
             to_node = map_neo4j_node_to_nodestream_node(
                 record["b"], node_type=self.to_node_type, schema=self.schema
             )
+            relationship = map_neo4j_relationship_to_nodestream_relationship(
+                record["r"], relationship_type=self.relationship_type
+            )
             if from_node is not None and to_node is not None:
                 yield RelationshipWithNodes(
                     from_node=from_node,
                     to_node=to_node,
-                    relationship=map_neo4j_relationship_to_nodestream_relationship(
-                        record["r"], relationship_type=self.relationship_type
-                    ),
+                    relationship=relationship,
                 ).into_ingest()
 
 
