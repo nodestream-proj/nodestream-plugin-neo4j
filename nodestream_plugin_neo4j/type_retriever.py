@@ -261,7 +261,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         self.sample_ratio = sample_ratio if sample_ratio and sample_ratio > 1 else None
         self.latest_hours = latest_hours
         self.preload_nodes = preload_nodes
-        self.histogram: TypeHistogram = TypeHistogram()
+        self.histogram: TypeHistogram | None = None
         self.cutoff: datetime = datetime.now(timezone.utc)
         self.distribution_strategy: DistributionStrategy = DISTRIBUTION_STRATEGIES.get(
             distribution, SequentialDistribution
@@ -277,6 +277,7 @@ class Neo4jTypeRetriever(TypeRetriever):
             yield extractor
 
     async def fetch_node_extractors(self) -> AsyncGenerator[Extractor, None]:
+        assert self.histogram is not None, "build_histogram() must be called before fetch_extractors()"
         schema = self.schema
         cutoff = self.cutoff
         node_counts = self.histogram.node_counts
@@ -301,6 +302,7 @@ class Neo4jTypeRetriever(TypeRetriever):
             yield extractor
 
     async def fetch_relationship_extractors(self) -> AsyncGenerator[Extractor, None]:
+        assert self.histogram is not None, "build_histogram() must be called before fetch_extractors()"
         schema = self.schema
         cutoff = self.cutoff
         relationship_counts = self.histogram.relationship_counts
