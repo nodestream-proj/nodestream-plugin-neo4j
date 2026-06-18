@@ -82,10 +82,7 @@ def map_neo4j_node_to_nodestream_node(
         return None
     node_schema = schema.get_node_type_by_name(node_type)
     properties = PropertySet(node)
-    key_values = PropertySet.empty()
-    for key_name in node_schema.keys:
-        if key_name in properties:
-            key_values[key_name] = properties.pop(key_name)
+    key_values = PropertySet({key_name: properties.pop(key_name) for key_name in node_schema.keys})
     additional_types: Tuple[str, ...] = tuple(
         label for label in node.labels if label != node_type
     )
