@@ -82,7 +82,9 @@ def map_neo4j_node_to_nodestream_node(
         return None
     node_schema = schema.get_node_type_by_name(node_type)
     properties = PropertySet(node)
-    key_values = PropertySet({key_name: properties.pop(key_name) for key_name in node_schema.keys})
+    key_values = PropertySet(
+        {key_name: properties.pop(key_name) for key_name in node_schema.keys}
+    )
     additional_types: Tuple[str, ...] = tuple(
         label for label in node.labels if label != node_type
     )
@@ -277,7 +279,9 @@ class Neo4jTypeRetriever(TypeRetriever):
             yield extractor
 
     async def fetch_node_extractors(self) -> AsyncGenerator[Extractor, None]:
-        assert self.histogram is not None, "build_histogram() must be called before fetch_extractors()"
+        assert (
+            self.histogram is not None
+        ), "build_histogram() must be called before fetch_extractors()"
         schema = self.schema
         cutoff = self.cutoff
         node_counts = self.histogram.node_counts
@@ -298,11 +302,15 @@ class Neo4jTypeRetriever(TypeRetriever):
             for node_type, count in node_counts.items()
             if count > 0
         ]
-        async for extractor in self.distribution_strategy.distribute(extractors_by_type):
+        async for extractor in self.distribution_strategy.distribute(
+            extractors_by_type
+        ):
             yield extractor
 
     async def fetch_relationship_extractors(self) -> AsyncGenerator[Extractor, None]:
-        assert self.histogram is not None, "build_histogram() must be called before fetch_extractors()"
+        assert (
+            self.histogram is not None
+        ), "build_histogram() must be called before fetch_extractors()"
         schema = self.schema
         cutoff = self.cutoff
         relationship_counts = self.histogram.relationship_counts
@@ -341,7 +349,9 @@ class Neo4jTypeRetriever(TypeRetriever):
             for relationship_type, adjacencies in relationship_type_adjacency_pairs
             if relationship_counts[relationship_type] > 0
         ]
-        async for extractor in self.distribution_strategy.distribute(extractors_by_type):
+        async for extractor in self.distribution_strategy.distribute(
+            extractors_by_type
+        ):
             yield extractor
 
     # -- Shard params helper ----------------------------------------------------
@@ -492,7 +502,9 @@ class Neo4jTypeRetriever(TypeRetriever):
         )
         return self.histogram
 
-    def compute_shards(self, total_count: int, shard_size: int) -> List[Tuple[int, int]]:
+    def compute_shards(
+        self, total_count: int, shard_size: int
+    ) -> List[Tuple[int, int]]:
         if total_count <= 0 or shard_size <= 0:
             return []
         number_of_shards = math.ceil(total_count / shard_size)
