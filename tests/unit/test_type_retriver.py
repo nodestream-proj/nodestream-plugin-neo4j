@@ -185,78 +185,55 @@ def test_sample_ratio_of_one_is_ignored(mocker):
 # -- Extractor builder tests -------------------------------------------------
 
 
-def test_build_node_extractor_with_key_field(subject, empty_schema):
+def test_build_node_extractor_with_key_field(subject):
     from datetime import datetime, timezone
 
-    cutoff = datetime.now(timezone.utc)
-    extractor = subject.build_node_shard_extractor(
-        "Person", "name", 0, 1000, schema=empty_schema, cutoff=cutoff
-    )
+    subject.cutoff = datetime.now(timezone.utc)
+    extractor = subject.build_node_shard_extractor("Person", "name", 0, 1000)
     assert isinstance(extractor, Neo4jNodeExtractor)
     assert "ORDER BY n.`name`" in extractor.statement
     assert extractor.params["shard_offset"] == 0
     assert extractor.params["shard_limit"] == 1000
-    assert extractor.params["cutoff"] == cutoff
+    assert extractor.params["cutoff"] == subject.cutoff
     assert extractor.node_type == "Person"
 
 
-def test_build_node_extractor_without_key_field_uses_element_id(subject, empty_schema):
+def test_build_node_extractor_without_key_field_uses_element_id(subject):
     """When key_field_for_node_type returns None (no schema key, no latest_hours),
     the builder falls back to elementId ordering — safe for non-nodestream graphs."""
     from datetime import datetime, timezone
 
-    cutoff = datetime.now(timezone.utc)
-    extractor = subject.build_node_shard_extractor(
-        "Person",
-        None,
-        500,
-        500,
-        schema=empty_schema,
-        cutoff=cutoff,
-    )
+    subject.cutoff = datetime.now(timezone.utc)
+    extractor = subject.build_node_shard_extractor("Person", None, 500, 500)
     assert isinstance(extractor, Neo4jNodeExtractor)
     assert "ORDER BY elementId(n)" in extractor.statement
     assert extractor.params["shard_offset"] == 500
     assert extractor.params["shard_limit"] == 500
 
 
-def test_build_relationship_extractor_with_key_field(subject, empty_schema):
+def test_build_relationship_extractor_with_key_field(subject):
     from datetime import datetime, timezone
 
-    cutoff = datetime.now(timezone.utc)
+    subject.cutoff = datetime.now(timezone.utc)
     extractor = subject.build_relationship_shard_extractor(
-        "Person",
-        "Person",
-        "BEST_FRIEND_OF",
-        "since",
-        0,
-        2000,
-        schema=empty_schema,
-        cutoff=cutoff,
+        "Person", "Person", "BEST_FRIEND_OF", "since", 0, 2000
     )
     assert isinstance(extractor, Neo4jRelationshipExtractor)
     assert "ORDER BY r.`since`" in extractor.statement
     assert extractor.params["shard_offset"] == 0
     assert extractor.params["shard_limit"] == 2000
-    assert extractor.params["cutoff"] == cutoff
+    assert extractor.params["cutoff"] == subject.cutoff
     assert extractor.from_node_type == "Person"
     assert extractor.to_node_type == "Person"
     assert extractor.relationship_type == "BEST_FRIEND_OF"
 
 
-def test_build_relationship_extractor_without_key_field(subject, empty_schema):
+def test_build_relationship_extractor_without_key_field(subject):
     from datetime import datetime, timezone
 
-    cutoff = datetime.now(timezone.utc)
+    subject.cutoff = datetime.now(timezone.utc)
     extractor = subject.build_relationship_shard_extractor(
-        "Person",
-        "Person",
-        "BEST_FRIEND_OF",
-        None,
-        100,
-        900,
-        schema=empty_schema,
-        cutoff=cutoff,
+        "Person", "Person", "BEST_FRIEND_OF", None, 100, 900
     )
     assert isinstance(extractor, Neo4jRelationshipExtractor)
     assert "ORDER BY elementId(r)" in extractor.statement
@@ -400,28 +377,25 @@ def test_key_field_for_node_type_with_latest_hours(basic_schema, mocker):
     retriever = Neo4jTypeRetriever(
         connection, basic_schema, shard_size=1000, latest_hours=24
     )
-    assert (
-        retriever.key_field_for_node_type("Person", basic_schema)
-        == LAST_INGESTED_AT_PROPERTY
-    )
+    assert retriever.key_field_for_node_type("Person") == LAST_INGESTED_AT_PROPERTY
 
 
 def test_key_field_for_node_type_from_schema_keys(basic_schema, mocker):
     connection = mocker.Mock()
     retriever = Neo4jTypeRetriever(connection, basic_schema, shard_size=1000)
-    assert retriever.key_field_for_node_type("Person", basic_schema) == "name"
+    assert retriever.key_field_for_node_type("Person") == "name"
 
 
 def test_key_field_for_node_type_no_schema_keys_returns_none(basic_schema, mocker):
     connection = mocker.Mock()
     retriever = Neo4jTypeRetriever(connection, basic_schema, shard_size=1000)
-    assert retriever.key_field_for_node_type("Organization", basic_schema) is None
+    assert retriever.key_field_for_node_type("Organization") is None
 
 
 def test_key_field_for_node_type_unknown_type_returns_none(basic_schema, mocker):
     connection = mocker.Mock()
     retriever = Neo4jTypeRetriever(connection, basic_schema, shard_size=1000)
-    assert retriever.key_field_for_node_type("Ghost", basic_schema) is None
+    assert retriever.key_field_for_node_type("Ghost") is None
 
 
 def test_key_field_for_relationship_type_with_latest_hours(basic_schema, mocker):
@@ -430,7 +404,7 @@ def test_key_field_for_relationship_type_with_latest_hours(basic_schema, mocker)
         connection, basic_schema, shard_size=1000, latest_hours=6
     )
     assert (
-        retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema)
+        retriever.key_field_for_relationship_type("BEST_FRIEND_OF")
         == LAST_INGESTED_AT_PROPERTY
     )
 
@@ -438,10 +412,7 @@ def test_key_field_for_relationship_type_with_latest_hours(basic_schema, mocker)
 def test_key_field_for_relationship_type_no_latest_hours(basic_schema, mocker):
     connection = mocker.Mock()
     retriever = Neo4jTypeRetriever(connection, basic_schema, shard_size=1000)
-    assert (
-        retriever.key_field_for_relationship_type("BEST_FRIEND_OF", basic_schema)
-        is None
-    )
+    assert retriever.key_field_for_relationship_type("BEST_FRIEND_OF") is None
 
 
 # -- fetch_extractors --------------------------------------------------------
@@ -449,8 +420,11 @@ def test_key_field_for_relationship_type_no_latest_hours(basic_schema, mocker):
 
 @pytest.mark.asyncio
 async def test_fetch_extractors_relationships_only_by_default(mocker, basic_schema):
+    from datetime import datetime, timezone
+
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema, shard_size=1000)
+    retriever.cutoff = datetime.now(timezone.utc)
     retriever.histogram = TypeHistogram(
         node_counts={"Person": 0, "Organization": 0},
         relationship_counts={"BEST_FRIEND_OF": 2500},
@@ -466,10 +440,13 @@ async def test_fetch_extractors_relationships_only_by_default(mocker, basic_sche
 async def test_fetch_extractors_preload_nodes_yields_nodes_then_relationships(
     mocker, basic_schema
 ):
+    from datetime import datetime, timezone
+
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(
         conn, basic_schema, shard_size=1000, preload_nodes=True
     )
+    retriever.cutoff = datetime.now(timezone.utc)
     retriever.histogram = TypeHistogram(
         node_counts={"Person": 1000, "Organization": 1000},
         relationship_counts={"BEST_FRIEND_OF": 1000},
@@ -488,11 +465,14 @@ async def test_fetch_extractors_preload_nodes_yields_nodes_then_relationships(
 
 @pytest.mark.asyncio
 async def test_fetch_extractors_skips_rel_type_with_no_adjacencies(mocker):
+    from datetime import datetime, timezone
+
     conn = mocker.Mock()
     schema = Schema()
     orphan_relationship = GraphObjectSchema(name="ORPHAN_REL", properties={})
     schema.put_relationship_type(orphan_relationship)
     retriever = Neo4jTypeRetriever(conn, schema, shard_size=1000)
+    retriever.cutoff = datetime.now(timezone.utc)
     retriever.histogram = TypeHistogram(
         node_counts={},
         relationship_counts={"ORPHAN_REL": 500},
@@ -503,8 +483,11 @@ async def test_fetch_extractors_skips_rel_type_with_no_adjacencies(mocker):
 
 @pytest.mark.asyncio
 async def test_fetch_extractors_skips_types_with_zero_count(mocker, basic_schema):
+    from datetime import datetime, timezone
+
     conn = mocker.Mock()
     retriever = Neo4jTypeRetriever(conn, basic_schema, shard_size=1000)
+    retriever.cutoff = datetime.now(timezone.utc)
     retriever.histogram = TypeHistogram(
         node_counts={"Person": 0, "Organization": 0},
         relationship_counts={"BEST_FRIEND_OF": 0},
@@ -603,6 +586,8 @@ async def test_relationship_extractor_skips_record_when_endpoint_type_unknown(
 
 @pytest.mark.asyncio
 async def test_round_robin_distribution_interleaves_types(mocker, basic_schema):
+    from datetime import datetime, timezone
+
     conn = mocker.Mock(Neo4jDatabaseConnection)
     retriever = Neo4jTypeRetriever(
         conn,
@@ -611,6 +596,7 @@ async def test_round_robin_distribution_interleaves_types(mocker, basic_schema):
         preload_nodes=True,
         distribution="round_robin",
     )
+    retriever.cutoff = datetime.now(timezone.utc)
     retriever.histogram = TypeHistogram(
         node_counts={"Person": 2000, "Organization": 1000},
         relationship_counts={"BEST_FRIEND_OF": 0},

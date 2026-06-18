@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from itertools import zip_longest
 from logging import getLogger
-from typing import AsyncGenerator, List, Optional, Tuple
+from typing import AsyncGenerator, Callable, Coroutine, List, Optional, Tuple
 
 from neo4j import RoutingControl
 from neo4j.graph import Node as Neo4jNode
@@ -21,16 +21,6 @@ from .query import Query
 LAST_INGESTED_AT_PROPERTY = "last_ingested_at"
 
 logger = getLogger(__name__)
-
-FETCH_ALL_NODES_BY_TYPE_QUERY_FORMAT = """\
-MATCH (n:{type})
-{where}RETURN n SKIP $offset LIMIT $limit
-"""
-
-FETCH_ALL_RELATIONSHIPS_BY_TYPE_BETWEEN_QUERY_FORMAT = """\
-MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
-{where}RETURN a, r, b SKIP $offset LIMIT $limit
-"""
 
 FETCH_NODES_SHARD_QUERY_FORMAT = """\
 MATCH (n:{type})
@@ -116,7 +106,9 @@ class Neo4jNodeExtractor(Extractor):
     The caller is responsible for supplying the Cypher statement and a params
     dict that includes ``shard_offset`` and ``shard_limit`` (plus any filter
     parameters such as ``cutoff``).  Records whose node type is absent from the
-    schema are silently skipped with a warning.
+    schema are skipped with a warning.  Records whose node type is present but
+    missing a declared schema key will raise ``KeyError`` — the key contract is
+    strict.
     """
 
     def __init__(
@@ -183,15 +175,16 @@ class Neo4jRelationshipExtractor(Extractor):
             to_node = map_neo4j_node_to_nodestream_node(
                 record["b"], node_type=self.to_node_type, schema=self.schema
             )
+            if from_node is None or to_node is None:
+                continue
             relationship = map_neo4j_relationship_to_nodestream_relationship(
                 record["r"], relationship_type=self.relationship_type
             )
-            if from_node is not None and to_node is not None:
-                yield RelationshipWithNodes(
-                    from_node=from_node,
-                    to_node=to_node,
-                    relationship=relationship,
-                ).into_ingest()
+            yield RelationshipWithNodes(
+                from_node=from_node,
+                to_node=to_node,
+                relationship=relationship,
+            ).into_ingest()
 
 
 # ---------------------------------------------------------------------------
@@ -264,10 +257,15 @@ class Neo4jTypeRetriever(TypeRetriever):
         self.latest_hours = latest_hours
         self.preload_nodes = preload_nodes
         self.histogram: TypeHistogram | None = None
-        self.cutoff: datetime = datetime.now(timezone.utc)
-        self.distribution_strategy: DistributionStrategy = DISTRIBUTION_STRATEGIES.get(
-            distribution, SequentialDistribution
-        )()
+        self.cutoff: datetime | None = None
+        if distribution not in DISTRIBUTION_STRATEGIES:
+            raise ValueError(
+                f"Unknown distribution {distribution!r}. "
+                f"Valid options: {list(DISTRIBUTION_STRATEGIES)}"
+            )
+        self.distribution_strategy: DistributionStrategy = DISTRIBUTION_STRATEGIES[
+            distribution
+        ]()
 
     # -- fetch_extractors --------------------------------------------------------
 
@@ -280,20 +278,16 @@ class Neo4jTypeRetriever(TypeRetriever):
 
     async def fetch_node_extractors(self) -> AsyncGenerator[Extractor, None]:
         assert (
-            self.histogram is not None
+            self.histogram is not None and self.cutoff is not None
         ), "build_histogram() must be called before fetch_extractors()"
-        schema = self.schema
-        cutoff = self.cutoff
         node_counts = self.histogram.node_counts
         extractors_by_type = [
             [
                 self.build_node_shard_extractor(
                     node_type,
-                    self.key_field_for_node_type(node_type, schema),
+                    self.key_field_for_node_type(node_type),
                     shard_offset,
                     shard_limit,
-                    schema=schema,
-                    cutoff=cutoff,
                 )
                 for shard_offset, shard_limit in self.compute_shards(
                     count, self.shard_size
@@ -309,23 +303,19 @@ class Neo4jTypeRetriever(TypeRetriever):
 
     async def fetch_relationship_extractors(self) -> AsyncGenerator[Extractor, None]:
         assert (
-            self.histogram is not None
+            self.histogram is not None and self.cutoff is not None
         ), "build_histogram() must be called before fetch_extractors()"
-        schema = self.schema
-        cutoff = self.cutoff
         relationship_counts = self.histogram.relationship_counts
 
         # Build (relationship_type, adjacencies) pairs, skipping types with no adjacencies.
         relationship_type_adjacency_pairs = [
-            (
-                relationship_type,
-                list(schema.get_adjacencies_by_relationship_type(relationship_type)),
-            )
-            for relationship_type in relationship_counts
-        ]
-        relationship_type_adjacency_pairs = [
             (relationship_type, adjacencies)
-            for relationship_type, adjacencies in relationship_type_adjacency_pairs
+            for relationship_type in relationship_counts
+            for adjacencies in [
+                list(
+                    self.schema.get_adjacencies_by_relationship_type(relationship_type)
+                )
+            ]
             if adjacencies
         ]
 
@@ -335,11 +325,9 @@ class Neo4jTypeRetriever(TypeRetriever):
                     adjacency.from_node_type,
                     adjacency.to_node_type,
                     relationship_type,
-                    self.key_field_for_relationship_type(relationship_type, schema),
+                    self.key_field_for_relationship_type(relationship_type),
                     shard_offset,
                     shard_limit,
-                    schema=schema,
-                    cutoff=cutoff,
                 )
                 for shard_offset, shard_limit in self.compute_shards(
                     relationship_counts[relationship_type], self.shard_size
@@ -373,8 +361,6 @@ class Neo4jTypeRetriever(TypeRetriever):
         key_field: Optional[str],
         shard_offset: int,
         shard_limit: int,
-        schema: Schema,
-        cutoff: datetime,
     ) -> Neo4jNodeExtractor:
         where_clause = self.build_where_clause("n")
         if key_field:
@@ -385,13 +371,13 @@ class Neo4jTypeRetriever(TypeRetriever):
             statement = FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT.format(
                 type=node_type, where=where_clause
             )
-        params = self.build_shard_parameters(cutoff, shard_offset, shard_limit)
+        params = self.build_shard_parameters(self.cutoff, shard_offset, shard_limit)
         return Neo4jNodeExtractor(
             self.database_connection,
             statement,
             params,
             node_type=node_type,
-            schema=schema,
+            schema=self.schema,
         )
 
     def build_relationship_shard_extractor(
@@ -402,8 +388,6 @@ class Neo4jTypeRetriever(TypeRetriever):
         key_field: Optional[str],
         shard_offset: int,
         shard_limit: int,
-        schema: Schema,
-        cutoff: datetime,
     ) -> Neo4jRelationshipExtractor:
         where_clause = self.build_where_clause("r", sample=True)
         if key_field:
@@ -421,7 +405,7 @@ class Neo4jTypeRetriever(TypeRetriever):
                 to_node_type=to_node_type,
                 where=where_clause,
             )
-        params = self.build_shard_parameters(cutoff, shard_offset, shard_limit)
+        params = self.build_shard_parameters(self.cutoff, shard_offset, shard_limit)
         return Neo4jRelationshipExtractor(
             self.database_connection,
             statement,
@@ -429,7 +413,7 @@ class Neo4jTypeRetriever(TypeRetriever):
             from_node_type=from_node_type,
             to_node_type=to_node_type,
             relationship_type=relationship_type,
-            schema=schema,
+            schema=self.schema,
         )
 
     # -- Query builders ---------------------------------------------------------
@@ -479,7 +463,12 @@ class Neo4jTypeRetriever(TypeRetriever):
         first_result = next(iter(results), None)
         return int(first_result["count"]) if first_result is not None else 0
 
-    async def gather_counts(self, types, count_function, cutoff: datetime) -> dict:
+    async def gather_counts(
+        self,
+        types: List[str],
+        count_function: Callable[[str, datetime], Coroutine],
+        cutoff: datetime,
+    ) -> dict:
         counts = await asyncio.gather(
             *(count_function(type_name, cutoff=cutoff) for type_name in types)
         )
@@ -529,7 +518,7 @@ class Neo4jTypeRetriever(TypeRetriever):
             return now - timedelta(hours=self.latest_hours)
         return now
 
-    def key_field_for_node_type(self, node_type: str, schema: Schema) -> Optional[str]:
+    def key_field_for_node_type(self, node_type: str) -> Optional[str]:
         """Return the field to ORDER BY when paginating nodes, or None for elementId.
 
         Priority:
@@ -542,12 +531,10 @@ class Neo4jTypeRetriever(TypeRetriever):
         """
         if self.latest_hours is not None:
             return LAST_INGESTED_AT_PROPERTY
-        node_schema = schema.get_node_type_by_name(node_type)
+        node_schema = self.schema.get_node_type_by_name(node_type)
         if node_schema and node_schema.keys:
             return next(iter(node_schema.keys))
         return None
 
-    def key_field_for_relationship_type(
-        self, relationship_type: str, schema: Schema
-    ) -> Optional[str]:
+    def key_field_for_relationship_type(self, relationship_type: str) -> Optional[str]:
         return LAST_INGESTED_AT_PROPERTY if self.latest_hours is not None else None
