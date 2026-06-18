@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from itertools import zip_longest
 from logging import getLogger
-from typing import Any, AsyncGenerator, Callable, Coroutine, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Callable, Coroutine
 
 from neo4j import RoutingControl
 from neo4j.graph import Node as Neo4jNode
@@ -75,7 +75,7 @@ def map_neo4j_node_to_nodestream_node(
     key_values = PropertySet(
         {key_name: properties.pop(key_name) for key_name in node_schema.keys}
     )
-    additional_types: Tuple[str, ...] = tuple(
+    additional_types: tuple[str, ...] = tuple(
         label for label in node.labels if label != node_type
     )
     return Node(
@@ -197,7 +197,7 @@ class DistributionStrategy(ABC):
 
     @abstractmethod
     def distribute(
-        self, extractors_by_type: List[List[Extractor]]
+        self, extractors_by_type: list[list[Extractor]]
     ) -> AsyncGenerator[Extractor, None]:
         ...  # pragma: no cover
 
@@ -206,7 +206,7 @@ class SequentialDistribution(DistributionStrategy):
     """Drain all shards of one type before moving to the next."""
 
     async def distribute(
-        self, extractors_by_type: List[List[Extractor]]
+        self, extractors_by_type: list[list[Extractor]]
     ) -> AsyncGenerator[Extractor, None]:
         for extractors in extractors_by_type:
             for extractor in extractors:
@@ -217,7 +217,7 @@ class RoundRobinDistribution(DistributionStrategy):
     """Yield one shard per type in rotation, so all types make progress together."""
 
     async def distribute(
-        self, extractors_by_type: List[List[Extractor]]
+        self, extractors_by_type: list[list[Extractor]]
     ) -> AsyncGenerator[Extractor, None]:
         sentinel = object()
         for column in zip_longest(*extractors_by_type, fillvalue=sentinel):
@@ -315,7 +315,7 @@ class Neo4jTypeRetriever(TypeRetriever):
             self.histogram is not None and self.cutoff is not None
         ), "build_histogram() must be called before fetch_extractors()"
         extractors_by_type = [
-            self.shards_for_relationship_type(relationship_type, adjacencies)
+            self.shards_for_relationship_type(relationship_type, count, adjacencies)
             for relationship_type, count in self.histogram.relationship_counts.items()
             if count > 0
             if (
@@ -333,7 +333,7 @@ class Neo4jTypeRetriever(TypeRetriever):
 
     def shards_for_node_type(
         self, node_type: str, count: int
-    ) -> List[Neo4jNodeExtractor]:
+    ) -> list[Neo4jNodeExtractor]:
         key_field = self.key_field_for_node_type(node_type)
         return [
             self.build_node_shard_extractor(
@@ -343,10 +343,9 @@ class Neo4jTypeRetriever(TypeRetriever):
         ]
 
     def shards_for_relationship_type(
-        self, relationship_type: str, adjacencies: list
-    ) -> List[Neo4jRelationshipExtractor]:
+        self, relationship_type: str, count: int, adjacencies: list
+    ) -> list[Neo4jRelationshipExtractor]:
         key_field = self.key_field_for_relationship_type(relationship_type)
-        count = self.histogram.relationship_counts[relationship_type]
         return [
             self.build_relationship_shard_extractor(
                 adjacency.from_node_type,
@@ -376,7 +375,7 @@ class Neo4jTypeRetriever(TypeRetriever):
     def build_node_shard_extractor(
         self,
         node_type: str,
-        key_field: Optional[str],
+        key_field: str | None,
         shard_offset: int,
         shard_limit: int,
     ) -> Neo4jNodeExtractor:
@@ -403,7 +402,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         from_node_type: str,
         to_node_type: str,
         relationship_type: str,
-        key_field: Optional[str],
+        key_field: str | None,
         shard_offset: int,
         shard_limit: int,
     ) -> Neo4jRelationshipExtractor:
@@ -483,10 +482,10 @@ class Neo4jTypeRetriever(TypeRetriever):
 
     async def gather_counts(
         self,
-        types: List[str],
+        types: list[str],
         count_function: Callable[[str, datetime], Coroutine[Any, Any, int]],
         cutoff: datetime,
-    ) -> dict:
+    ) -> dict[str, int]:
         counts = await asyncio.gather(
             *(count_function(type_name, cutoff=cutoff) for type_name in types)
         )
@@ -511,7 +510,7 @@ class Neo4jTypeRetriever(TypeRetriever):
 
     def compute_shards(
         self, total_count: int, shard_size: int
-    ) -> List[Tuple[int, int]]:
+    ) -> list[tuple[int, int]]:
         if total_count <= 0 or shard_size <= 0:
             return []
         number_of_shards = math.ceil(total_count / shard_size)
@@ -536,7 +535,7 @@ class Neo4jTypeRetriever(TypeRetriever):
             return now - timedelta(hours=self.latest_hours)
         return now
 
-    def key_field_for_node_type(self, node_type: str) -> Optional[str]:
+    def key_field_for_node_type(self, node_type: str) -> str | None:
         """Return the field to ORDER BY when paginating nodes, or None for elementId.
 
         Priority:
@@ -554,7 +553,7 @@ class Neo4jTypeRetriever(TypeRetriever):
             return next(iter(node_schema.keys))
         return None
 
-    def key_field_for_relationship_type(self, relationship_type: str) -> Optional[str]:
+    def key_field_for_relationship_type(self, relationship_type: str) -> str | None:
         """Return the field to ORDER BY when paginating relationships, or None for elementId.
 
         Relationships only use ``last_ingested_at`` ordering when recency filtering
