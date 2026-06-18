@@ -115,7 +115,7 @@ class Neo4jNodeExtractor(Extractor):
         self,
         connection: Neo4jDatabaseConnection,
         statement: str,
-        params: dict,
+        params: dict[str, Any],
         node_type: str,
         schema: Schema,
     ) -> None:
@@ -125,7 +125,7 @@ class Neo4jNodeExtractor(Extractor):
         self.node_type = node_type
         self.schema = schema
 
-    async def extract_records(self) -> AsyncGenerator:
+    async def extract_records(self) -> AsyncGenerator[Any, None]:
         results = await self.connection.execute(
             Query(self.statement, self.params), routing_=RoutingControl.READ
         )
@@ -143,14 +143,14 @@ class Neo4jRelationshipExtractor(Extractor):
     The caller is responsible for supplying the Cypher statement and a params
     dict that includes ``shard_offset`` and ``shard_limit`` (plus any filter
     parameters such as ``cutoff``).  Records where either endpoint node type is
-    absent from the schema are silently skipped with a warning.
+    absent from the schema are skipped with a warning.
     """
 
     def __init__(
         self,
         connection: Neo4jDatabaseConnection,
         statement: str,
-        params: dict,
+        params: dict[str, Any],
         from_node_type: str,
         to_node_type: str,
         relationship_type: str,
@@ -164,7 +164,7 @@ class Neo4jRelationshipExtractor(Extractor):
         self.relationship_type = relationship_type
         self.schema = schema
 
-    async def extract_records(self) -> AsyncGenerator:
+    async def extract_records(self) -> AsyncGenerator[Any, None]:
         results = await self.connection.execute(
             Query(self.statement, self.params), routing_=RoutingControl.READ
         )
@@ -296,10 +296,13 @@ class Neo4jTypeRetriever(TypeRetriever):
         async for extractor in self.fetch_relationship_extractors():
             yield extractor
 
-    async def fetch_node_extractors(self) -> AsyncGenerator[Extractor, None]:
+    def assert_histogram_ready(self) -> None:
         assert (
             self.histogram is not None and self.cutoff is not None
         ), "build_histogram() must be called before fetch_extractors()"
+
+    async def fetch_node_extractors(self) -> AsyncGenerator[Extractor, None]:
+        self.assert_histogram_ready()
         extractors_by_type = [
             self.shards_for_node_type(node_type, count)
             for node_type, count in self.histogram.node_counts.items()
@@ -311,14 +314,12 @@ class Neo4jTypeRetriever(TypeRetriever):
             yield extractor
 
     async def fetch_relationship_extractors(self) -> AsyncGenerator[Extractor, None]:
-        assert (
-            self.histogram is not None and self.cutoff is not None
-        ), "build_histogram() must be called before fetch_extractors()"
+        self.assert_histogram_ready()
         extractors_by_type = [
             self.shards_for_relationship_type(relationship_type, count, adjacencies)
             for relationship_type, count in self.histogram.relationship_counts.items()
             if count > 0
-            if (
+            and (
                 adjacencies := list(
                     self.schema.get_adjacencies_by_relationship_type(relationship_type)
                 )
@@ -343,7 +344,10 @@ class Neo4jTypeRetriever(TypeRetriever):
         ]
 
     def shards_for_relationship_type(
-        self, relationship_type: str, count: int, adjacencies: list
+        self,
+        relationship_type: str,
+        count: int,
+        adjacencies: list[Any],
     ) -> list[Neo4jRelationshipExtractor]:
         key_field = self.key_field_for_relationship_type(relationship_type)
         return [
@@ -363,7 +367,7 @@ class Neo4jTypeRetriever(TypeRetriever):
 
     def build_shard_parameters(
         self, cutoff: datetime, shard_offset: int, shard_limit: int
-    ) -> dict:
+    ) -> dict[str, Any]:
         return dict(
             self.build_filter_parameters(cutoff),
             shard_offset=shard_offset,
@@ -449,7 +453,7 @@ class Neo4jTypeRetriever(TypeRetriever):
             return ""
         return "WHERE " + " AND ".join(clauses) + "\n"
 
-    def build_filter_parameters(self, cutoff: datetime) -> dict[str, object]:
+    def build_filter_parameters(self, cutoff: datetime) -> dict[str, Any]:
         # Kept as a method rather than inlined so subclasses can extend
         # the parameter set without overriding the full shard builders.
         return {"cutoff": cutoff}
@@ -508,9 +512,8 @@ class Neo4jTypeRetriever(TypeRetriever):
         )
         return self.histogram
 
-    def compute_shards(
-        self, total_count: int, shard_size: int
-    ) -> list[tuple[int, int]]:
+    @staticmethod
+    def compute_shards(total_count: int, shard_size: int) -> list[tuple[int, int]]:
         if total_count <= 0 or shard_size <= 0:
             return []
         number_of_shards = math.ceil(total_count / shard_size)
