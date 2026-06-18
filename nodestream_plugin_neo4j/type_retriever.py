@@ -296,13 +296,13 @@ class Neo4jTypeRetriever(TypeRetriever):
         async for extractor in self.fetch_relationship_extractors():
             yield extractor
 
-    def assert_histogram_ready(self) -> None:
+    def verify_histogram_built(self) -> None:
         assert (
             self.histogram is not None and self.cutoff is not None
         ), "build_histogram() must be called before fetch_extractors()"
 
     async def fetch_node_extractors(self) -> AsyncGenerator[Extractor, None]:
-        self.assert_histogram_ready()
+        self.verify_histogram_built()
         extractors_by_type = [
             self.shards_for_node_type(node_type, count)
             for node_type, count in self.histogram.node_counts.items()
@@ -314,7 +314,8 @@ class Neo4jTypeRetriever(TypeRetriever):
             yield extractor
 
     async def fetch_relationship_extractors(self) -> AsyncGenerator[Extractor, None]:
-        self.assert_histogram_ready()
+        self.verify_histogram_built()
+        # Skip relationship types with zero count or no adjacencies in the schema.
         extractors_by_type = [
             self.shards_for_relationship_type(relationship_type, count, adjacencies)
             for relationship_type, count in self.histogram.relationship_counts.items()
