@@ -99,7 +99,7 @@ async def async_generator(*items):
 def test_map_neo4j_node_to_nodestream_node(basic_schema):
     neo_node = FakeNeo4jNode(("Person", "Employee"), {"name": "John", "id": 123})
     result = map_neo4j_node_to_nodestream_node(
-        type_cast(Neo4jNode, neo_node), nodeType="Person", schema=basic_schema
+        type_cast(Neo4jNode, neo_node), node_type="Person", schema=basic_schema
     )
     assert result is not None
     assert result.type == "Person"
@@ -112,7 +112,7 @@ def test_map_neo4j_node_to_nodestream_node(basic_schema):
 def test_map_neo4j_relationship_to_nodestream_relationship():
     rel = FakeNeo4jRel("KNOWS", {"since": 2019})
     result = map_neo4j_relationship_to_nodestream_relationship(
-        type_cast(Neo4jRelationship, rel), relationshipType="KNOWS"
+        type_cast(Neo4jRelationship, rel), relationship_type="KNOWS"
     )
     assert result == Relationship(type="KNOWS", properties=PropertySet({"since": 2019}))
 
@@ -189,7 +189,7 @@ def test_build_node_extractor_with_key_field(subject, empty_schema):
     from datetime import datetime, timezone
 
     cutoff = datetime.now(timezone.utc)
-    extractor = subject.buildNodeShardExtractor(
+    extractor = subject.build_node_shard_extractor(
         "Person", "name", 0, 1000, schema=empty_schema, cutoff=cutoff
     )
     assert isinstance(extractor, Neo4jNodeExtractor)
@@ -197,7 +197,7 @@ def test_build_node_extractor_with_key_field(subject, empty_schema):
     assert extractor.params["shard_offset"] == 0
     assert extractor.params["shard_limit"] == 1000
     assert extractor.params["cutoff"] == cutoff
-    assert extractor.nodeType == "Person"
+    assert extractor.node_type == "Person"
 
 
 def test_build_node_extractor_without_key_field_uses_element_id(subject, empty_schema):
@@ -206,7 +206,7 @@ def test_build_node_extractor_without_key_field_uses_element_id(subject, empty_s
     from datetime import datetime, timezone
 
     cutoff = datetime.now(timezone.utc)
-    extractor = subject.buildNodeShardExtractor(
+    extractor = subject.build_node_shard_extractor(
         "Person",
         None,
         500,
@@ -224,7 +224,7 @@ def test_build_relationship_extractor_with_key_field(subject, empty_schema):
     from datetime import datetime, timezone
 
     cutoff = datetime.now(timezone.utc)
-    extractor = subject.buildRelationshipShardExtractor(
+    extractor = subject.build_relationship_shard_extractor(
         "Person",
         "Person",
         "BEST_FRIEND_OF",
@@ -239,16 +239,16 @@ def test_build_relationship_extractor_with_key_field(subject, empty_schema):
     assert extractor.params["shard_offset"] == 0
     assert extractor.params["shard_limit"] == 2000
     assert extractor.params["cutoff"] == cutoff
-    assert extractor.fromNodeType == "Person"
-    assert extractor.toNodeType == "Person"
-    assert extractor.relationshipType == "BEST_FRIEND_OF"
+    assert extractor.from_node_type == "Person"
+    assert extractor.to_node_type == "Person"
+    assert extractor.relationship_type == "BEST_FRIEND_OF"
 
 
 def test_build_relationship_extractor_without_key_field(subject, empty_schema):
     from datetime import datetime, timezone
 
     cutoff = datetime.now(timezone.utc)
-    extractor = subject.buildRelationshipShardExtractor(
+    extractor = subject.build_relationship_shard_extractor(
         "Person",
         "Person",
         "BEST_FRIEND_OF",
@@ -363,7 +363,7 @@ def basic_schema():
 def test_map_neo4j_node_to_nodestream_node_with_schema_extracts_keys(basic_schema):
     neo_node = FakeNeo4jNode(("Person",), {"name": "Alice", "age": 30})
     result = map_neo4j_node_to_nodestream_node(
-        type_cast(Neo4jNode, neo_node), nodeType="Person", schema=basic_schema
+        type_cast(Neo4jNode, neo_node), node_type="Person", schema=basic_schema
     )
     assert result is not None
     assert "name" in result.key_values
@@ -376,7 +376,7 @@ def test_map_neo4j_node_to_nodestream_node_schema_unknown_type_returns_none(
 ):
     neo_node = FakeNeo4jNode(("Unknown",), {"x": 1})
     result = map_neo4j_node_to_nodestream_node(
-        type_cast(Neo4jNode, neo_node), nodeType="Unknown", schema=basic_schema
+        type_cast(Neo4jNode, neo_node), node_type="Unknown", schema=basic_schema
     )
     assert result is None
 
@@ -385,11 +385,11 @@ def test_map_neo4j_node_to_nodestream_node_schema_unknown_type_returns_none(
 
 
 def test_compute_shards_zero_count_returns_empty(subject):
-    assert subject.computeShards(0, 1000) == []
+    assert subject.compute_shards(0, 1000) == []
 
 
 def test_compute_shards_negative_shard_size_returns_empty(subject):
-    assert subject.computeShards(5000, 0) == []
+    assert subject.compute_shards(5000, 0) == []
 
 
 # -- key_field helpers -------------------------------------------------------
@@ -475,13 +475,13 @@ async def test_fetch_extractors_preload_nodes_yields_nodes_then_relationships(
         relationship_counts={"BEST_FRIEND_OF": 1000},
     )
     extractors = [e async for e in retriever.fetch_extractors()]
-    nodeExtractors = [e for e in extractors if isinstance(e, Neo4jNodeExtractor)]
-    relationshipExtractors = [
+    node_extractors = [e for e in extractors if isinstance(e, Neo4jNodeExtractor)]
+    relationship_extractors = [
         e for e in extractors if isinstance(e, Neo4jRelationshipExtractor)
     ]
     # 2 node types * 1 shard each = 2, then 1 rel type * 1 adjacency * 1 shard = 1
-    assert_that(nodeExtractors, has_length(2))
-    assert_that(relationshipExtractors, has_length(1))
+    assert_that(node_extractors, has_length(2))
+    assert_that(relationship_extractors, has_length(1))
     # Nodes come first
     assert isinstance(extractors[0], Neo4jNodeExtractor)
 
@@ -490,8 +490,8 @@ async def test_fetch_extractors_preload_nodes_yields_nodes_then_relationships(
 async def test_fetch_extractors_skips_rel_type_with_no_adjacencies(mocker):
     conn = mocker.Mock()
     schema = Schema()
-    orphanRelationship = GraphObjectSchema(name="ORPHAN_REL", properties={})
-    schema.put_relationship_type(orphanRelationship)
+    orphan_relationship = GraphObjectSchema(name="ORPHAN_REL", properties={})
+    schema.put_relationship_type(orphan_relationship)
     retriever = Neo4jTypeRetriever(conn, schema, shard_size=1000)
     retriever.histogram = TypeHistogram(
         node_counts={},
@@ -525,7 +525,7 @@ async def test_node_extractor_extract_records(mocker, basic_schema):
         connection=connection,
         statement="MATCH (n:Person) SKIP $shard_offset LIMIT $shard_limit RETURN n",
         params={"shard_offset": 0, "shard_limit": 10},
-        nodeType="Person",
+        node_type="Person",
         schema=basic_schema,
     )
     results = [record async for record in extractor.extract_records()]
@@ -543,7 +543,7 @@ async def test_node_extractor_skips_record_for_unknown_type(mocker, basic_schema
         connection=connection,
         statement="MATCH (n:UnknownType) RETURN n",
         params={"shard_offset": 0, "shard_limit": 10},
-        nodeType="UnknownType",
+        node_type="UnknownType",
         schema=basic_schema,
     )
     results = [record async for record in extractor.extract_records()]
@@ -563,9 +563,9 @@ async def test_relationship_extractor_extract_records(mocker, basic_schema):
         connection=connection,
         statement="MATCH (a:Person)-[r:BEST_FRIEND_OF]->(b:Person) SKIP $shard_offset LIMIT $shard_limit RETURN a, r, b",
         params={"shard_offset": 0, "shard_limit": 10},
-        fromNodeType="Person",
-        toNodeType="Person",
-        relationshipType="BEST_FRIEND_OF",
+        from_node_type="Person",
+        to_node_type="Person",
+        relationship_type="BEST_FRIEND_OF",
         schema=basic_schema,
     )
     results = [record async for record in extractor.extract_records()]
@@ -589,9 +589,9 @@ async def test_relationship_extractor_skips_record_when_endpoint_type_unknown(
         connection=connection,
         statement="MATCH (a:Person)-[r:BEST_FRIEND_OF]->(b:UnknownType) RETURN a, r, b",
         params={"shard_offset": 0, "shard_limit": 10},
-        fromNodeType="Person",
-        toNodeType="UnknownType",
-        relationshipType="BEST_FRIEND_OF",
+        from_node_type="Person",
+        to_node_type="UnknownType",
+        relationship_type="BEST_FRIEND_OF",
         schema=basic_schema,
     )
     results = [record async for record in extractor.extract_records()]
@@ -615,7 +615,7 @@ async def test_round_robin_distribution_interleaves_types(mocker, basic_schema):
         node_counts={"Person": 2000, "Organization": 1000},
         relationship_counts={"BEST_FRIEND_OF": 0},
     )
-    nodeExtractors = [e async for e in retriever.fetchNodeExtractors()]
+    nodeExtractors = [e async for e in retriever.fetch_node_extractors()]
     # Person: 2 shards, Organization: 1 shard → 3 total, interleaved
     assert_that(nodeExtractors, has_length(3))
 
@@ -656,7 +656,7 @@ async def test_build_histogram_nodes_and_rels(mocker, basic_schema):
 def test_snapshot_cutoff_with_latest_hours(mocker):
     conn = mocker.Mock(Neo4jDatabaseConnection)
     retriever = Neo4jTypeRetriever(conn, Schema(), shard_size=1000, latest_hours=6)
-    cutoff = retriever.snapshotCutoff()
+    cutoff = retriever.snapshot_cutoff()
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc)
@@ -668,7 +668,7 @@ def test_snapshot_cutoff_with_latest_hours(mocker):
 def test_snapshot_cutoff_without_latest_hours_returns_now(mocker):
     conn = mocker.Mock(Neo4jDatabaseConnection)
     retriever = Neo4jTypeRetriever(conn, Schema(), shard_size=1000)
-    cutoff = retriever.snapshotCutoff()
+    cutoff = retriever.snapshot_cutoff()
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc)
