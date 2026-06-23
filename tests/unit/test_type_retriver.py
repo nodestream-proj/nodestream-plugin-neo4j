@@ -191,7 +191,7 @@ def test_build_node_extractor_with_key_field(subject):
     subject.cutoff = datetime.now(timezone.utc)
     extractor = subject.build_node_shard_extractor("Person", "name", 0, 1000)
     assert isinstance(extractor, Neo4jNodeExtractor)
-    assert "ORDER BY n.`name`" in extractor.statement
+    assert "ORDER BY n.`name`, elementId(n)" in extractor.statement
     assert extractor.params["shard_offset"] == 0
     assert extractor.params["shard_limit"] == 1000
     assert extractor.params["cutoff"] == subject.cutoff
@@ -219,7 +219,7 @@ def test_build_relationship_extractor_with_key_field(subject):
         "Person", "Person", "BEST_FRIEND_OF", "since", 0, 2000
     )
     assert isinstance(extractor, Neo4jRelationshipExtractor)
-    assert "ORDER BY r.`since`" in extractor.statement
+    assert "ORDER BY r.`since`, elementId(r)" in extractor.statement
     assert extractor.params["shard_offset"] == 0
     assert extractor.params["shard_limit"] == 2000
     assert extractor.params["cutoff"] == subject.cutoff
@@ -660,3 +660,43 @@ def test_snapshot_cutoff_without_latest_hours_returns_now(mocker):
     now = datetime.now(timezone.utc)
     # Should be within 1 second of now
     assert abs((now - cutoff).total_seconds()) < 1
+
+
+# -- New tests for PR fixes --------------------------------------------------
+
+
+def test_map_neo4j_node_tolerates_missing_schema_key(basic_schema):
+    """A node missing a declared key field should be mapped without raising."""
+    neo_node = FakeNeo4jNode(("Person",), {"age": 30})  # "name" key is missing
+    result = map_neo4j_node_to_nodestream_node(
+        type_cast(Neo4jNode, neo_node), node_type="Person", schema=basic_schema
+    )
+    assert result is not None
+    assert "name" not in result.key_values
+    assert result.properties["age"] == 30
+
+
+def test_verify_histogram_built_raises_when_not_built(subject):
+    with pytest.raises(RuntimeError, match="build_histogram\\(\\) must be called"):
+        subject.verify_histogram_built()
+
+
+@pytest.mark.asyncio
+async def test_gather_counts_returns_correct_mapping(mocker, subject):
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
+    types = [f"Type{i}" for i in range(25)]
+    count_fn = AsyncMock(return_value=10)
+    result = await subject.gather_counts(types, count_fn, cutoff)
+    assert len(result) == 25
+    assert all(v == 10 for v in result.values())
+
+
+def test_sample_ratio_coerced_to_int(mocker):
+    connection = mocker.Mock(Neo4jDatabaseConnection)
+    retriever = Neo4jTypeRetriever(
+        connection, Schema(), shard_size=1000, sample_ratio=5.7
+    )
+    assert retriever.sample_ratio == 5
+    assert isinstance(retriever.sample_ratio, int)

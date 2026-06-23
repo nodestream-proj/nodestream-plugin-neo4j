@@ -12,49 +12,52 @@ from neo4j.graph import Relationship as Neo4jRelationship
 from nodestream.databases import TypeRetriever
 from nodestream.databases.copy import TypeHistogram
 from nodestream.model import Node, PropertySet, Relationship, RelationshipWithNodes
+from nodestream.model.creation_rules import NodeCreationRule, RelationshipCreationRule
 from nodestream.pipeline import Extractor
 from nodestream.schema import Schema
 
 from .neo4j_database import Neo4jDatabaseConnection
 from .query import Query
 
+MAX_HISTOGRAM_CONCURRENCY = 20
+
 LAST_INGESTED_AT_PROPERTY = "last_ingested_at"
 
 logger = getLogger(__name__)
 
 FETCH_NODES_SHARD_QUERY_FORMAT = """\
-MATCH (n:{type})
-{where}WITH n ORDER BY n.`{key_field}` SKIP $shard_offset LIMIT $shard_limit
+MATCH (n:`{type}`)
+{where}WITH n ORDER BY n.`{key_field}`, elementId(n) SKIP $shard_offset LIMIT $shard_limit
 RETURN n
 """
 
 FETCH_RELATIONSHIPS_SHARD_QUERY_FORMAT = """\
-MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
-{where}WITH a, r, b ORDER BY r.`{key_field}` SKIP $shard_offset LIMIT $shard_limit
+MATCH (a:`{from_node_type}`)-[r:`{relationship_type}`]->(b:`{to_node_type}`)
+{where}WITH a, r, b ORDER BY r.`{key_field}`, elementId(r) SKIP $shard_offset LIMIT $shard_limit
 RETURN a, r, b
 """
 
 
 FETCH_NODES_SHARD_ELEMENTID_QUERY_FORMAT = """\
-MATCH (n:{type})
+MATCH (n:`{type}`)
 {where}WITH n ORDER BY elementId(n) SKIP $shard_offset LIMIT $shard_limit
 RETURN n
 """
 
 FETCH_RELATIONSHIPS_SHARD_ELEMENTID_QUERY_FORMAT = """\
-MATCH (a:{from_node_type})-[r:{relationship_type}]->(b:{to_node_type})
+MATCH (a:`{from_node_type}`)-[r:`{relationship_type}`]->(b:`{to_node_type}`)
 {where}WITH a, r, b ORDER BY elementId(r) SKIP $shard_offset LIMIT $shard_limit
 RETURN a, r, b
 """
 
 
 COUNT_NODES_BY_TYPE_QUERY_FORMAT = """\
-MATCH (n:{type})
+MATCH (n:`{type}`)
 {where}RETURN count(n) AS count
 """
 
 COUNT_RELATIONSHIPS_BY_TYPE_QUERY_FORMAT = """\
-MATCH ()-[r:{relationship_type}]->()
+MATCH ()-[r:`{relationship_type}`]->()
 {where}RETURN count(r) AS count
 """
 
@@ -72,8 +75,15 @@ def map_neo4j_node_to_nodestream_node(
         return None
     node_schema = schema.get_node_type_by_name(node_type)
     properties = PropertySet(node)
+    missing_keys = [k for k in node_schema.keys if k not in properties]
+    if missing_keys:
+        logger.warning(
+            "Node type %r is missing declared key(s) %r — they will be absent from the copy",
+            node_type,
+            missing_keys,
+        )
     key_values = PropertySet(
-        {key_name: properties.pop(key_name) for key_name in node_schema.keys}
+        {k: properties.pop(k) for k in node_schema.keys if k in properties}
     )
     additional_types: tuple[str, ...] = tuple(
         label for label in node.labels if label != node_type
@@ -106,9 +116,8 @@ class Neo4jNodeExtractor(Extractor):
     The caller is responsible for supplying the Cypher statement and a params
     dict that includes ``shard_offset`` and ``shard_limit`` (plus any filter
     parameters such as ``cutoff``).  Records whose node type is absent from the
-    schema are skipped with a warning.  Records whose node type is present but
-    missing a declared schema key will raise ``KeyError`` — the key contract is
-    strict.
+    schema are skipped with a warning.  Records missing a declared schema key
+    are copied without that key field and a warning is logged.
     """
 
     def __init__(
@@ -184,6 +193,9 @@ class Neo4jRelationshipExtractor(Extractor):
                 from_node=from_node,
                 to_node=to_node,
                 relationship=relationship,
+                from_side_node_creation_rule=NodeCreationRule.EAGER,
+                to_side_node_creation_rule=NodeCreationRule.EAGER,
+                relationship_creation_rule=RelationshipCreationRule.EAGER,
             ).into_ingest()
 
 
@@ -247,7 +259,11 @@ class Neo4jTypeRetriever(TypeRetriever):
         shard_size: Number of records per shard (ORDER BY + SKIP/LIMIT page).
         sample_ratio: When set to an integer N > 1, only records whose element
             ID modulo N equals 0 are copied — a ~1/N sample of the graph.
-            Values of None or 1 disable sampling entirely.
+            Values of None or 1 disable sampling entirely.  Sampling is applied
+            to relationships only, not nodes.  When ``preload_nodes=True`` this
+            means nodes are copied in full while relationships are sampled —
+            useful for ensuring all node targets exist before writing sampled
+            edges.
         latest_hours: When set, only records with ``last_ingested_at`` within
             this many hours of the run start are copied.
         preload_nodes: When True, all node extractors are yielded before any
@@ -272,7 +288,9 @@ class Neo4jTypeRetriever(TypeRetriever):
         self.database_connection = database_connection
         self.shard_size = shard_size
         self.sample_ratio = (
-            None if sample_ratio is None or sample_ratio <= 1 else sample_ratio
+            None
+            if sample_ratio is None or int(sample_ratio) <= 1
+            else int(sample_ratio)
         )
         self.latest_hours = latest_hours
         self.preload_nodes = preload_nodes
@@ -297,9 +315,10 @@ class Neo4jTypeRetriever(TypeRetriever):
             yield extractor
 
     def verify_histogram_built(self) -> None:
-        assert (
-            self.histogram is not None and self.cutoff is not None
-        ), "build_histogram() must be called before fetch_extractors()"
+        if self.histogram is None or self.cutoff is None:
+            raise RuntimeError(
+                "build_histogram() must be called before fetch_extractors()"
+            )
 
     async def fetch_node_extractors(self) -> AsyncGenerator[Extractor, None]:
         self.verify_histogram_built()
@@ -384,6 +403,8 @@ class Neo4jTypeRetriever(TypeRetriever):
         shard_offset: int,
         shard_limit: int,
     ) -> Neo4jNodeExtractor:
+        # TODO(sampling-asymmetry): sampling is intentionally NOT applied to nodes
+        # — sample=False here means all nodes are copied in full regardless of sample_ratio.
         where_clause = self.build_where_clause("n")
         if key_field:
             statement = FETCH_NODES_SHARD_QUERY_FORMAT.format(
@@ -411,6 +432,8 @@ class Neo4jTypeRetriever(TypeRetriever):
         shard_offset: int,
         shard_limit: int,
     ) -> Neo4jRelationshipExtractor:
+        # TODO(sampling-asymmetry): sampling IS applied to relationships (sample=True)
+        # — this is intentional asymmetry; nodes are full, relationships are sampled.
         where_clause = self.build_where_clause("r", sample=True)
         if key_field:
             statement = FETCH_RELATIONSHIPS_SHARD_QUERY_FORMAT.format(
@@ -491,9 +514,13 @@ class Neo4jTypeRetriever(TypeRetriever):
         count_function: Callable[[str, datetime], Coroutine[Any, Any, int]],
         cutoff: datetime,
     ) -> dict[str, int]:
-        counts = await asyncio.gather(
-            *(count_function(type_name, cutoff=cutoff) for type_name in types)
-        )
+        semaphore = asyncio.Semaphore(MAX_HISTOGRAM_CONCURRENCY)
+
+        async def bounded(typeName: str) -> int:
+            async with semaphore:
+                return await count_function(typeName, cutoff=cutoff)
+
+        counts = await asyncio.gather(*(bounded(t) for t in types))
         return dict(zip(types, counts))
 
     async def build_histogram(self) -> TypeHistogram:
