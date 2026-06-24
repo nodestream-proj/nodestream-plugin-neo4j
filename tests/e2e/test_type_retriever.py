@@ -33,6 +33,7 @@ def _build_test_schema() -> Schema:
     schema = Schema()
     schema.put_node_type(GraphObjectSchema(PERSON_LABEL))
     schema.put_node_type(GraphObjectSchema(COMPANY_LABEL))
+    schema.put_relationship_type(GraphObjectSchema(RELATIONSHIP_TYPE))
     schema.add_adjacency(
         Adjacency(PERSON_LABEL, COMPANY_LABEL, RELATIONSHIP_TYPE),
         AdjacencyCardinality(Cardinality.SINGLE, Cardinality.MANY),
