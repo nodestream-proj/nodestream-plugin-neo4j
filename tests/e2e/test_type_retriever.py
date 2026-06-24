@@ -1,5 +1,8 @@
 import pytest
 
+from nodestream.schema import Adjacency, AdjacencyCardinality, Cardinality
+from nodestream.schema.state import GraphObjectSchema, Schema
+
 from nodestream_plugin_neo4j.neo4j_database import Neo4jDatabaseConnection
 from nodestream_plugin_neo4j.type_retriever import Neo4jTypeRetriever
 
@@ -25,6 +28,37 @@ CONTAINER_A_REL_COUNT = (CONTAINER_A_PERSON_COUNT // 2) * CONTAINER_A_COMPANY_CO
 CONTAINER_B_PERSON_COUNT = 40
 CONTAINER_B_COMPANY_COUNT = 8
 CONTAINER_B_REL_COUNT = (CONTAINER_B_PERSON_COUNT // 2) * CONTAINER_B_COMPANY_COUNT
+
+
+def _build_test_schema() -> Schema:
+    schema = Schema()
+    schema.put_node_type(GraphObjectSchema(PERSON_LABEL))
+    schema.put_node_type(GraphObjectSchema(COMPANY_LABEL))
+    schema.add_adjacency(
+        Adjacency(PERSON_LABEL, COMPANY_LABEL, RELATIONSHIP_TYPE),
+        AdjacencyCardinality(Cardinality.SINGLE, Cardinality.MANY),
+    )
+    return schema
+
+
+def _make_retriever(
+    connection: Neo4jDatabaseConnection, **kwargs
+) -> Neo4jTypeRetriever:
+    return Neo4jTypeRetriever(
+        connection,
+        _build_test_schema(),
+        shard_size=1000,
+        **kwargs,
+    )
+
+
+async def _collect_all_records(retriever: Neo4jTypeRetriever) -> list:
+    await retriever.build_histogram()
+    records = []
+    async for extractor in retriever.fetch_extractors():
+        async for record in extractor.extract_records():
+            records.append(record)
+    return records
 
 
 def seed_graph(
@@ -98,59 +132,79 @@ def seed_graph(
 @pytest.mark.e2e
 @pytest.mark.parametrize("neo4j_version", TESTED_NEO4J_VERSIONS)
 async def test_type_retriever_single_container(neo4j_container, neo4j_version):
-    # Start a single Neo4j container and seed it with test data
     with neo4j_container(
         neo4j_version
-    ) as primary_container, primary_container.get_driver() as primary_driver, primary_driver.session() as primary_session:
+    ) as container, container.get_driver() as driver, driver.session() as session:
         seed_graph(
-            primary_session,
+            session,
             num_people=SINGLE_CONTAINER_PERSON_COUNT,
             num_companies=SINGLE_CONTAINER_COMPANY_COUNT,
             rel_type=RELATIONSHIP_TYPE,
         )
 
-        # Create a database connection and initialize the type retriever
-        primary_connection = Neo4jDatabaseConnection.from_configuration(
-            uri=primary_container.get_connection_url(),
+        connection = Neo4jDatabaseConnection.from_configuration(
+            uri=container.get_connection_url(),
             username="neo4j",
             password="password",
         )
-        type_retriever = Neo4jTypeRetriever(primary_connection)
+        retriever = _make_retriever(connection)
+        await retriever.build_histogram()
 
-        # Verify node retrieval by type
-        person_nodes = [
-            node async for node in type_retriever.get_nodes_of_type(PERSON_LABEL)
-        ]
-        assert len(person_nodes) == SINGLE_CONTAINER_PERSON_COUNT
-        # Ensure complex shapes made it through normalization and mapping
-        assert any(
-            "tags" in n.properties and isinstance(n.properties["tags"], list)
-            for n in person_nodes
+        assert (
+            retriever.histogram.node_counts.get(PERSON_LABEL, 0)
+            == SINGLE_CONTAINER_PERSON_COUNT
         )
-        assert any(
-            "scores" in n.properties and isinstance(n.properties["scores"], list)
-            for n in person_nodes
+        assert (
+            retriever.histogram.node_counts.get(COMPANY_LABEL, 0)
+            == SINGLE_CONTAINER_COMPANY_COUNT
         )
-        assert any(
-            "active" in n.properties and isinstance(n.properties["active"], bool)
-            for n in person_nodes
+        assert (
+            retriever.histogram.relationship_counts.get(RELATIONSHIP_TYPE, 0)
+            == SINGLE_CONTAINER_REL_COUNT
         )
-        # At least one multi-labeled node should have an additional type
-        assert any("Employee" in n.additional_types for n in person_nodes)
 
-        # Verify relationship retrieval between specific node types
-        works_at_between_person_company = [
-            rel
-            async for rel in type_retriever.get_relationships_of_type_between(
-                PERSON_LABEL, COMPANY_LABEL, RELATIONSHIP_TYPE
-            )
-        ]
-        assert len(works_at_between_person_company) == SINGLE_CONTAINER_REL_COUNT
-        # All relationships should include the seeded property
-        assert all(
-            "since" in r.relationship.properties
-            for r in works_at_between_person_company
+        # Collect all records via fetch_extractors and verify counts
+        records = []
+        async for extractor in retriever.fetch_extractors():
+            async for record in extractor.extract_records():
+                records.append(record)
+
+        assert len(records) == (
+            SINGLE_CONTAINER_PERSON_COUNT
+            + SINGLE_CONTAINER_COMPANY_COUNT
+            + SINGLE_CONTAINER_REL_COUNT
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.parametrize("neo4j_version", TESTED_NEO4J_VERSIONS)
+async def test_type_retriever_relationships_only(neo4j_container, neo4j_version):
+    with neo4j_container(
+        neo4j_version
+    ) as container, container.get_driver() as driver, driver.session() as session:
+        seed_graph(
+            session,
+            num_people=SINGLE_CONTAINER_PERSON_COUNT,
+            num_companies=SINGLE_CONTAINER_COMPANY_COUNT,
+            rel_type=RELATIONSHIP_TYPE,
+        )
+
+        connection = Neo4jDatabaseConnection.from_configuration(
+            uri=container.get_connection_url(),
+            username="neo4j",
+            password="password",
+        )
+        retriever = _make_retriever(connection, relationships_only=True)
+        await retriever.build_histogram()
+
+        records = []
+        async for extractor in retriever.fetch_extractors():
+            async for record in extractor.extract_records():
+                records.append(record)
+
+        # Only relationships should be fetched — no node records
+        assert len(records) == SINGLE_CONTAINER_REL_COUNT
 
 
 @pytest.mark.asyncio
@@ -166,7 +220,6 @@ async def test_type_retriever_two_containers_counts(neo4j_container, neo4j_versi
     ) as container_a, container_a.get_driver() as driver_a, driver_a.session() as session_a, neo4j_container(
         neo4j_version
     ) as container_b, container_b.get_driver() as driver_b, driver_b.session() as session_b:
-        # Seed different volumes of data in each container
         seed_graph(
             session_a,
             num_people=CONTAINER_A_PERSON_COUNT,
@@ -180,43 +233,40 @@ async def test_type_retriever_two_containers_counts(neo4j_container, neo4j_versi
             rel_type=RELATIONSHIP_TYPE,
         )
 
-        # Initialize connections and type retrievers for each container
         connection_a = Neo4jDatabaseConnection.from_configuration(
             uri=container_a.get_connection_url(), username="neo4j", password="password"
         )
         connection_b = Neo4jDatabaseConnection.from_configuration(
             uri=container_b.get_connection_url(), username="neo4j", password="password"
         )
-        type_retriever_a = Neo4jTypeRetriever(connection_a)
-        type_retriever_b = Neo4jTypeRetriever(connection_b)
+        retriever_a = _make_retriever(connection_a)
+        retriever_b = _make_retriever(connection_b)
 
-        # Compare counts of Person nodes
-        person_nodes_a = [
-            n async for n in type_retriever_a.get_nodes_of_type(PERSON_LABEL)
-        ]
-        person_nodes_b = [
-            n async for n in type_retriever_b.get_nodes_of_type(PERSON_LABEL)
-        ]
-        assert len(person_nodes_a) == CONTAINER_A_PERSON_COUNT
-        assert len(person_nodes_b) == CONTAINER_B_PERSON_COUNT
-        assert len(person_nodes_b) >= len(person_nodes_a)
-        # Spot-check complex shapes exist in both containers
-        assert any("tags" in n.properties for n in person_nodes_a)
-        assert any("tags" in n.properties for n in person_nodes_b)
+        await retriever_a.build_histogram()
+        await retriever_b.build_histogram()
 
-        # Compare counts of WORKS_AT relationships specifically between Person and Company
-        works_at_between_a = [
-            r
-            async for r in type_retriever_a.get_relationships_of_type_between(
-                PERSON_LABEL, COMPANY_LABEL, RELATIONSHIP_TYPE
-            )
-        ]
-        works_at_between_b = [
-            r
-            async for r in type_retriever_b.get_relationships_of_type_between(
-                PERSON_LABEL, COMPANY_LABEL, RELATIONSHIP_TYPE
-            )
-        ]
-        assert len(works_at_between_a) == CONTAINER_A_REL_COUNT
-        assert len(works_at_between_b) == CONTAINER_B_REL_COUNT
-        assert len(works_at_between_b) >= len(works_at_between_a)
+        assert (
+            retriever_a.histogram.node_counts.get(PERSON_LABEL, 0)
+            == CONTAINER_A_PERSON_COUNT
+        )
+        assert (
+            retriever_b.histogram.node_counts.get(PERSON_LABEL, 0)
+            == CONTAINER_B_PERSON_COUNT
+        )
+        assert (
+            retriever_b.histogram.node_counts[PERSON_LABEL]
+            >= retriever_a.histogram.node_counts[PERSON_LABEL]
+        )
+
+        assert (
+            retriever_a.histogram.relationship_counts.get(RELATIONSHIP_TYPE, 0)
+            == CONTAINER_A_REL_COUNT
+        )
+        assert (
+            retriever_b.histogram.relationship_counts.get(RELATIONSHIP_TYPE, 0)
+            == CONTAINER_B_REL_COUNT
+        )
+        assert (
+            retriever_b.histogram.relationship_counts[RELATIONSHIP_TYPE]
+            >= retriever_a.histogram.relationship_counts[RELATIONSHIP_TYPE]
+        )
