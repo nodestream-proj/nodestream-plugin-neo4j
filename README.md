@@ -73,8 +73,8 @@ Benchmark result: **~45 min, ~612 relationships/s** for a production graph with 
 
 ```bash
 nodestream copy \
-  --from skip-neo4j \
-  --to skip-neo4j-lower-environment \
+  --from <source> \
+  --to <destination> \
   --all \
   --retriever-option relationships_only=true \
   --retriever-option latest_hours=24 \
