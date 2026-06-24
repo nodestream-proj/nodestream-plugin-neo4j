@@ -51,6 +51,21 @@ def test_make_type_retriever_with_filters(mocker):
     assert_that(retriever.latest_hours, equal_to(24))
 
 
+def test_make_type_retriever_with_relationships_only(mocker):
+    connector = Neo4jDatabaseConnector(
+        database_connection=mocker.Mock(),
+        use_apoc=True,
+        use_enterprise_features=True,
+    )
+    retriever = connector.make_type_retriever(
+        schema=Schema(),
+        relationships_only=True,
+        distribution="round_robin",
+    )
+    assert isinstance(retriever, Neo4jTypeRetriever)
+    assert_that(retriever.relationships_only, equal_to(True))
+
+
 def test_from_file_data_no_enterprise_features():
     connector = Neo4jDatabaseConnector.from_file_data(
         uri="bolt://localhost:7687",

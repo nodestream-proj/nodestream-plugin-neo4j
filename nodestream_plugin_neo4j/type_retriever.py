@@ -268,6 +268,9 @@ class Neo4jTypeRetriever(TypeRetriever):
             this many hours of the run start are copied.
         preload_nodes: When True, all node extractors are yielded before any
             relationship extractors (useful for two-pass ingestion patterns).
+        relationships_only: When True, skip node extraction entirely and only
+            copy relationships. Useful when nodes already exist in the
+            destination and only edges need to be synced.
         distribution: Shard interleaving strategy. ``"sequential"`` drains all
             shards of one type before the next; ``"round_robin"`` interleaves
             one shard per type per round.
@@ -282,6 +285,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         sample_ratio: int | None = None,
         latest_hours: int | None = None,
         preload_nodes: bool = False,
+        relationships_only: bool = False,
         distribution: str = DEFAULT_DISTRIBUTION,
     ) -> None:
         super().__init__(schema=schema)
@@ -294,6 +298,7 @@ class Neo4jTypeRetriever(TypeRetriever):
         )
         self.latest_hours = latest_hours
         self.preload_nodes = preload_nodes
+        self.relationships_only = relationships_only
         self.histogram: TypeHistogram | None = None
         self.cutoff: datetime | None = None
         if distribution not in DISTRIBUTION_STRATEGIES:
@@ -308,11 +313,14 @@ class Neo4jTypeRetriever(TypeRetriever):
     # -- fetch_extractors --------------------------------------------------------
 
     async def fetch_extractors(self) -> AsyncGenerator[Extractor, None]:
-        if self.preload_nodes:
+        if not self.relationships_only and self.preload_nodes:
             async for extractor in self.fetch_node_extractors():
                 yield extractor
         async for extractor in self.fetch_relationship_extractors():
             yield extractor
+        if not self.relationships_only and not self.preload_nodes:
+            async for extractor in self.fetch_node_extractors():
+                yield extractor
 
     def verify_histogram_built(self) -> None:
         if self.histogram is None or self.cutoff is None:
