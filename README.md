@@ -69,7 +69,7 @@ The `nodestream copy` command copies nodes and relationships from one Neo4j targ
 
 ### Best-known configuration (relationships, 24 h incremental)
 
-Benchmark result: **~45 min, ~612 relationships/s** for a production graph with ~1.7 M relationships (2026-05-18, `sample_ratio=50`).
+Benchmark result: **~27 min, ~776 relationships/s peak** for a production graph with ~1.27 M relationships (2026-06-24, `sample_ratio=100`).
 
 ```bash
 nodestream copy \
@@ -78,27 +78,25 @@ nodestream copy \
   --all \
   --retriever-option relationships_only=true \
   --retriever-option latest_hours=24 \
-  --retriever-option sample_ratio=50 \
-  --retriever-option limit=50000 \
   --retriever-option shard_size=10000 \
-  --concurrency-limit 40 \
-  --flush-concurrency 4 \
-  --batch-size 50000 \
-  --step-outbox-size 500000 \
-  --reporting-frequency 5000 \
+  --concurrency-limit 20 \
+  --flush-concurrency 8 \
+  --batch-size 100000 \
+  --step-outbox-size 2000000 \
+  --reporting-frequency 30 \
   --connector-option execute_chunks_in_parallel=true \
   --connector-option chunk_size=10000 \
   --connector-option retries_per_chunk=5 \
-  --metrics-interval-in-seconds 15 \
+  --metrics-interval-in-seconds 30 \
   --json
 ```
 
 **Why these values:**
-- `limit=50000` — large page size keeps each reader busy; queues stay full vs. the prior `limit=2500` which left queues at 1–2% utilisation.
-- `shard_size=10000` — splits large relationship types into independent coroutines, saturating all 40 concurrency slots.
-- `concurrency-limit=40` — matches the number of shards produced for the largest types; diminishing returns beyond this.
-- `flush-concurrency=4` — 4 parallel write lanes; Neo4j write throughput saturates around here for a single AuraDB instance.
-- `step-outbox-size=500000` — large buffer so the extractor is never blocked waiting for the writer to drain.
+- `shard_size=10000` — splits large relationship types into independent coroutines, filling all concurrency slots.
+- `concurrency-limit=20` — higher values (e.g. 30–40) cause SessionExpired/network errors on the destination; 20 gives 0–50 errors vs. 200+ at 30.
+- `flush-concurrency=8` — 8 parallel write lanes; saturates destination write throughput without overloading connections.
+- `batch-size=100000` — larger batches amortise per-batch overhead; peak throughput higher than 50K batches.
+- `step-outbox-size=2000000` — large buffer so the extractor is never blocked waiting for the writer to drain.
 - `relationships_only=true` + `latest_hours=24` — incremental mode; nodes are stable, only new/changed relationships need copying.
 
 ## Concepts
