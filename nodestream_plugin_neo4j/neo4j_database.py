@@ -118,7 +118,13 @@ class Neo4jDatabaseConnection:
             auth = AsyncAuthManagers.basic(auth_provider_factory(username, password))
             return AsyncGraphDatabase.driver(uri, auth=auth, **driver_kwargs)
 
-        return cls(driver_factory, database_name, max_retry_attempts, retry_factor, connection_semaphore_limit=connection_semaphore_limit)
+        return cls(
+            driver_factory,
+            database_name,
+            max_retry_attempts,
+            retry_factor,
+            connection_semaphore_limit=connection_semaphore_limit,
+        )
 
     def __init__(
         self,
