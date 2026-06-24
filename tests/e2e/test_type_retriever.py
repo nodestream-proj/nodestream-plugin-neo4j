@@ -1,5 +1,4 @@
 import pytest
-
 from nodestream.schema import Adjacency, AdjacencyCardinality, Cardinality
 from nodestream.schema.state import GraphObjectSchema, Schema
 
