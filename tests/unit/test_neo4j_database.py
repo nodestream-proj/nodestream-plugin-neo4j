@@ -264,6 +264,141 @@ async def test_auth_provider_factory_with_static_values():
 
 
 @pytest.mark.asyncio
+async def test_close_when_driver_is_none(mocker):
+    """close() is a no-op and does not raise when the driver was never created."""
+    db = Neo4jDatabaseConnection(lambda: mocker.AsyncMock(AsyncDriver), "neo4j")
+    # _driver is None by default — must not raise
+    await db.close()
+    assert db._driver is None
+
+
+@pytest.mark.asyncio
+async def test_close_when_driver_exists(database_connection, mock_driver):
+    """close() closes the driver and sets _driver to None."""
+    await database_connection.close()
+    mock_driver.close.assert_called_once()
+    assert database_connection._driver is None
+
+
+@pytest.mark.asyncio
+async def test_log_error_messages_from_statistics_logs_errors(
+    database_connection, mocker
+):
+    stats = mocker.Mock()
+    stats.error_messages = ["error one", "error two"]
+    mock_logger = mocker.Mock()
+    database_connection.logger = mock_logger
+    database_connection.log_error_messages_from_statistics(stats)
+    assert mock_logger.info.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_raises_after_max_retries(database_connection, mocker):
+    """After max_retry_attempts the last exception is re-raised."""
+    from neo4j.exceptions import TransientError
+
+    database_connection.max_retry_attempts = 2
+    database_connection.retry_factor = 0
+    database_connection._execute_query = mocker.AsyncMock(
+        side_effect=TransientError("boom")
+    )
+    with pytest.raises(TransientError):
+        await database_connection.execute(A_QUERY)
+    assert database_connection._execute_query.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_raises_immediately_for_non_retryable(
+    database_connection, mocker
+):
+    """A non-retryable exception (e.g. plain RuntimeError) is re-raised immediately."""
+    database_connection._execute_query = mocker.AsyncMock(
+        side_effect=RuntimeError("bad query")
+    )
+    with pytest.raises(RuntimeError, match="bad query"):
+        await database_connection.execute(A_QUERY)
+    assert database_connection._execute_query.call_count == 1
+
+
+# -- is_retryable ------------------------------------------------------------
+
+
+def test_is_retryable_auth_rate_limit():
+    from neo4j.exceptions import ClientError
+
+    from nodestream_plugin_neo4j.neo4j_database import (
+        AUTH_RATE_LIMIT_CODE,
+        is_retryable,
+    )
+
+    e = ClientError()
+    e.code = AUTH_RATE_LIMIT_CODE
+    assert is_retryable(e)
+
+
+def test_is_retryable_ssl_handshake_value_error():
+    from nodestream_plugin_neo4j.neo4j_database import is_retryable
+
+    err = ValueError("ssl_handshake_timeout should be a positive number, got 0")
+    assert is_retryable(err)
+
+
+def test_is_retryable_attribute_error_none_complete():
+    from nodestream_plugin_neo4j.neo4j_database import is_retryable
+
+    err = AttributeError("'NoneType' object has no attribute 'complete'")
+    assert is_retryable(err)
+
+
+def test_is_retryable_connection_reset_error():
+    from nodestream_plugin_neo4j.neo4j_database import is_retryable
+
+    assert is_retryable(ConnectionResetError("Connection reset by peer"))
+
+
+def test_is_retryable_incomplete_commit():
+    from neo4j.exceptions import IncompleteCommit
+
+    from nodestream_plugin_neo4j.neo4j_database import is_retryable
+
+    assert is_retryable(IncompleteCommit("Failed to read from defunct connection"))
+
+
+def test_is_not_retryable_plain_value_error():
+    from nodestream_plugin_neo4j.neo4j_database import is_retryable
+
+    assert not is_retryable(ValueError("some unrelated error"))
+
+
+def test_is_not_retryable_plain_attribute_error():
+    from nodestream_plugin_neo4j.neo4j_database import is_retryable
+
+    assert not is_retryable(AttributeError("'Foo' object has no attribute 'bar'"))
+
+
+@pytest.mark.asyncio
+async def test_from_configuration_driver_factory_builds_driver(mocker):
+    """The closure returned by from_configuration actually calls AsyncGraphDatabase.driver."""
+    mock_driver_instance = mocker.AsyncMock(AsyncDriver)
+    mocker.patch(
+        "nodestream_plugin_neo4j.neo4j_database.AsyncGraphDatabase.driver",
+        return_value=mock_driver_instance,
+    )
+    mocker.patch(
+        "nodestream_plugin_neo4j.neo4j_database.AsyncAuthManagers.basic",
+        return_value=mocker.Mock(),
+    )
+    conn = Neo4jDatabaseConnection.from_configuration(
+        uri="bolt://localhost:7687",
+        username="neo4j",
+        password="password",
+    )
+    # Trigger the factory closure to exercise lines 142-143
+    driver = conn.driver_factory()
+    assert driver is mock_driver_instance
+
+
+@pytest.mark.asyncio
 async def test_execute_implicit_uses_session_run(  # covers _run_implicit_query via execute()
     database_connection, mock_driver, mocker
 ):

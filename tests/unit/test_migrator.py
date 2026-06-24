@@ -146,8 +146,13 @@ async def test_execute_relationship_type_renamed(migrator):
 
 @pytest.mark.asyncio
 async def test_execute_relationship_type_created(migrator):
-    # Neo4j Does not need us to do anything here.
-    pass
+    # Neo4j Does not need us to do anything here — the method is a no-op.
+    from nodestream.schema.migrations.operations import CreateRelationshipType
+
+    operation = CreateRelationshipType(name="KNOWS", keys=[], properties=[])
+    await migrator.execute_operation(operation)
+    # No queries should have been executed.
+    migrator.database_connection.execute.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -333,3 +338,125 @@ async def test_node_key_renamed(migrator, mocker):
             f"IN TRANSACTIONS OF {migrator.transaction_batch_size} ROWS"
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_node_key_part_renamed_skips_when_old_key_not_in_constraint(
+    migrator, mocker
+):
+    """When old_key_part_name is not in the current constraint, the operation is a no-op."""
+    migrator.get_properties_by_constraint_name = mocker.AsyncMock(
+        return_value={"other_key"}
+    )
+    migrator.drop_constraint_by_name = mocker.AsyncMock()
+    operation = NodeKeyPartRenamed(
+        new_key_part_name="new_key",
+        node_type="NodeType",
+        old_key_part_name="missing_key",
+    )
+    await migrator.execute_operation(operation)
+    # Should return early — no constraint drop, no rename
+    migrator.drop_constraint_by_name.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_acquire_lock_raises_cannot_acquire_when_execute_fails(
+    migrator, database_connection
+):
+    from nodestream_plugin_neo4j.migrator import CannotAcquireLockException
+
+    database_connection.execute.side_effect = Exception("neo4j unreachable")
+    with pytest.raises(CannotAcquireLockException):
+        await migrator.acquire_lock()
+
+
+@pytest.mark.asyncio
+async def test_acquire_lock_success(migrator, database_connection, mocker):
+    database_connection.execute.return_value = []
+    # Should not raise
+    await migrator.acquire_lock()
+
+
+@pytest.mark.asyncio
+async def test_release_lock(migrator, database_connection):
+    database_connection.execute.return_value = []
+    await migrator.release_lock()
+    database_connection.execute.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_mark_migration_as_executed(migrator, database_connection, mocker):
+    from nodestream.schema.migrations import Migration
+
+    migration = mocker.Mock(Migration)
+    migration.name = "0001_initial"
+    database_connection.execute.return_value = []
+    await migrator.mark_migration_as_executed(migration)
+    database_connection.execute.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_completed_migrations(migrator, database_connection, mocker):
+    from nodestream.schema.migrations import MigrationGraph
+
+    graph = mocker.Mock(MigrationGraph)
+    m = mocker.Mock()
+    graph.get_migration.return_value = m
+    database_connection.execute.return_value = [{"name": "0001_initial"}]
+    result = await migrator.get_completed_migrations(graph)
+    assert result == [m]
+    graph.get_migration.assert_called_once_with("0001_initial")
+
+
+@pytest.mark.asyncio
+async def test_drop_all_indexes_on_type_node(migrator, mocker):
+    """drop_all_indexes_on_type for NODE calls DropAdditionalNodePropertyIndex."""
+    migrator.get_indexed_properties_by_type = mocker.AsyncMock(return_value={"prop"})
+    migrator.execute_operation = mocker.AsyncMock()
+    result = await migrator.drop_all_indexes_on_type("NODE", "NodeType")
+    assert result == {"prop"}
+    call_arg = migrator.execute_operation.call_args[0][0]
+    assert isinstance(call_arg, DropAdditionalNodePropertyIndex)
+
+
+@pytest.mark.asyncio
+async def test_drop_all_indexes_on_type_relationship(migrator, mocker):
+    """drop_all_indexes_on_type for RELATIONSHIP calls DropAdditionalRelationshipPropertyIndex."""
+    migrator.get_indexed_properties_by_type = mocker.AsyncMock(return_value={"since"})
+    migrator.execute_operation = mocker.AsyncMock()
+    result = await migrator.drop_all_indexes_on_type("RELATIONSHIP", "REL_TYPE")
+    assert result == {"since"}
+    call_arg = migrator.execute_operation.call_args[0][0]
+    assert isinstance(call_arg, DropAdditionalRelationshipPropertyIndex)
+
+
+@pytest.mark.asyncio
+async def test_execute_rename_node_type_with_indexes(migrator, mocker):
+    """Indexed properties are dropped on old type and recreated on new type."""
+    migrator.get_properties_by_constraint_name = mocker.AsyncMock(return_value=set())
+    migrator.get_indexed_properties_by_type = mocker.AsyncMock(return_value={"since"})
+    migrator.execute_drop_additional_node_property_index = mocker.AsyncMock()
+    migrator.execute_add_additional_node_property_index = mocker.AsyncMock()
+    operation = RenameNodeType(old_type="OldType", new_type="NewType")
+    await migrator.execute_rename_node_type(operation)
+    migrator.execute_drop_additional_node_property_index.assert_called_once()
+    migrator.execute_add_additional_node_property_index.assert_called_once()
+    add_call_arg = migrator.execute_add_additional_node_property_index.call_args[0][0]
+    assert isinstance(add_call_arg, AddAdditionalNodePropertyIndex)
+    assert add_call_arg.node_type == "NewType"
+
+
+@pytest.mark.asyncio
+async def test_execute_rename_relationship_type_with_indexes(migrator, mocker):
+    """Indexed properties are dropped on old rel type and recreated on new one."""
+    migrator.get_indexed_properties_by_type = mocker.AsyncMock(return_value={"since"})
+    migrator.execute_drop_additional_node_property_index = mocker.AsyncMock()
+    migrator.execute_add_additional_relationship_property_index = mocker.AsyncMock()
+    operation = RenameRelationshipType(old_type="OLD_REL", new_type="NEW_REL")
+    await migrator.execute_rename_relationship_type(operation)
+    migrator.execute_add_additional_relationship_property_index.assert_called_once()
+    add_call_arg = (
+        migrator.execute_add_additional_relationship_property_index.call_args[0][0]
+    )
+    assert isinstance(add_call_arg, AddAdditionalRelationshipPropertyIndex)
+    assert add_call_arg.relationship_type == "NEW_REL"

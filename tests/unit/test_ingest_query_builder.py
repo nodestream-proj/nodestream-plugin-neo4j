@@ -492,3 +492,14 @@ def test_relationship_update_with_created_timestamp_generates_expected_queries(
     assert_that(
         query.batched_parameter_sets, equal_to(expected_query.batched_parameter_sets)
     )
+
+
+def test_generate_ttl_match_query_raises_when_expiry_is_none(query_builder):
+    """generate_ttl_match_query must raise when expiry_in_hours is None."""
+    ttl = TimeToLiveConfiguration(
+        graph_object_type=GraphObjectType.NODE,
+        object_type="TestType",
+        expiry_in_hours=None,
+    )
+    with pytest.raises(ValueError, match="Expiry in hours must be set"):
+        query_builder.generate_ttl_match_query(ttl)

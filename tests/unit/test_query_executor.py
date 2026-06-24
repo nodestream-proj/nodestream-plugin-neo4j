@@ -99,3 +99,9 @@ async def test_execute_hook(query_executor, some_query, mocker):
     await query_executor.execute_hook(hook)
     hook.as_cypher_query_and_parameters.assert_called_once()
     assert_that(query_executor, ran_query(some_query))
+
+
+@pytest.mark.asyncio
+async def test_finish_closes_connection(query_executor):
+    await query_executor.finish()
+    query_executor.database_connection.close.assert_called_once()

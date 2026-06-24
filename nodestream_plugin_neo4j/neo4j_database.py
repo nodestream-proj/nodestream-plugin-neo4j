@@ -18,16 +18,33 @@ from neo4j.auth_management import AsyncAuthManagers
 from neo4j.exceptions import (
     AuthError,
     ClientError,
+    IncompleteCommit,
     ServiceUnavailable,
     SessionExpired,
     TransientError,
 )
+
+try:
+    from neo4j.exceptions import ConnectionAcquisitionTimeoutError
+except ImportError:
+    ConnectionAcquisitionTimeoutError = None  # type: ignore[assignment,misc]
 from nodestream.file_io import LazyLoadedArgument
 
 from .query import Query
 from .result import Neo4jQueryStatistics, Neo4jResult
 
-RETRYABLE_EXCEPTIONS = (TransientError, ServiceUnavailable, SessionExpired, AuthError)
+RETRYABLE_EXCEPTIONS = tuple(
+    exceptionType
+    for exceptionType in (
+        TransientError,
+        ServiceUnavailable,
+        SessionExpired,
+        IncompleteCommit,
+        AuthError,
+        ConnectionAcquisitionTimeoutError,
+    )
+    if exceptionType is not None
+)
 AUTH_RATE_LIMIT_CODE = "Neo.ClientError.Security.AuthenticationRateLimit"
 
 
@@ -35,9 +52,23 @@ def is_retryable(e: Exception) -> bool:
     if isinstance(e, RETRYABLE_EXCEPTIONS):
         return True
     # AuthenticationRateLimit is a ClientError (not AuthError) but is transient.
-    return (
-        isinstance(e, ClientError) and getattr(e, "code", None) == AUTH_RATE_LIMIT_CODE
-    )
+    if isinstance(e, ClientError) and getattr(e, "code", None) == AUTH_RATE_LIMIT_CODE:
+        return True
+    # uvloop bug: exhausted connection_acquisition_timeout causes uvloop to receive
+    # ssl_handshake_timeout=0, raising ValueError with no typed neo4j exception.
+    if isinstance(e, ValueError) and "ssl_handshake_timeout" in str(e):
+        return True
+    # Driver 6.x bug: broken connection during rotation causes fetch_all()/reset()
+    # to dequeue None, raising AttributeError: 'NoneType' object has no attribute 'complete'.
+    if isinstance(
+        e, AttributeError
+    ) and "'NoneType' object has no attribute 'complete'" in str(e):
+        return True
+    # uvloop SSL handshake reset: connection dropped by remote during TLS negotiation.
+    # Surfaces as bare ConnectionResetError from uvloop/sslproto.pyx, not a neo4j exception.
+    if isinstance(e, ConnectionResetError):
+        return True
+    return False
 
 
 def convert_routing_control_to_access_mode(routing_control: RoutingControl) -> str:
@@ -80,13 +111,20 @@ class Neo4jDatabaseConnection:
         database_name: str = "neo4j",
         max_retry_attempts: int = 3,
         retry_factor: int = 1,
+        connection_semaphore_limit: int = 0,
         **driver_kwargs,
     ):
         def driver_factory() -> AsyncDriver:
             auth = AsyncAuthManagers.basic(auth_provider_factory(username, password))
             return AsyncGraphDatabase.driver(uri, auth=auth, **driver_kwargs)
 
-        return cls(driver_factory, database_name, max_retry_attempts, retry_factor)
+        return cls(
+            driver_factory,
+            database_name,
+            max_retry_attempts,
+            retry_factor,
+            connection_semaphore_limit=connection_semaphore_limit,
+        )
 
     def __init__(
         self,
@@ -94,6 +132,7 @@ class Neo4jDatabaseConnection:
         database_name: str,
         max_retry_attempts: int = 3,
         retry_factor: float = 1,
+        connection_semaphore_limit: int = 0,
     ) -> None:
         self.driver_factory: Callable[[], AsyncDriver] = driver_factory
         self.database_name = database_name
@@ -103,6 +142,11 @@ class Neo4jDatabaseConnection:
         self._driver: AsyncDriver | None = None
         self.query_set: set[str] = set()
         self._driver_lock = asyncio.Lock()
+        # Semaphore is created lazily on first use to ensure it is bound to the
+        # running event loop (asyncio.Semaphore() called before loop.run() attaches
+        # to the wrong loop in Python 3.10+).
+        self._connection_semaphore_limit = connection_semaphore_limit
+        self._semaphore: asyncio.Semaphore | None = None
 
     async def _get_driver(self) -> AsyncDriver:
         """Return the current driver, waiting if a rotation is in progress."""
@@ -154,6 +198,20 @@ class Neo4jDatabaseConnection:
             self.query_set.add(query.query_statement)
 
     async def _execute_query(
+        self,
+        query: Query,
+        log_result: bool = False,
+        routing_=RoutingControl.WRITE,
+    ) -> Iterable[Record]:
+        if self._connection_semaphore_limit > 0:
+            if self._semaphore is None:
+                # Lazy init: must be created inside the running event loop.
+                self._semaphore = asyncio.Semaphore(self._connection_semaphore_limit)
+            async with self._semaphore:
+                return await self._execute_query_inner(query, log_result, routing_)
+        return await self._execute_query_inner(query, log_result, routing_)
+
+    async def _execute_query_inner(
         self,
         query: Query,
         log_result: bool = False,

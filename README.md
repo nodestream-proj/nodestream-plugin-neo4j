@@ -45,9 +45,63 @@ input and yields the records read from the database. The extractor will automati
 
 The extractor will automatically add the `SKIP` and `LIMIT` clauses to the query. The extractor will also automatically add the `offset` and `limit` parameters to the query. The extractor will start with `offset` set to `0` and `limit` set to `100` (unless overridden by setting `limit`) The extractor will continue to paginate through the database until the query returns no results. 
 
-## Concepts 
+## Copy Command
 
-### Migrations 
+The `nodestream copy` command copies nodes and relationships from one Neo4j target to another. The Neo4j plugin exposes the following `--retriever-option` parameters to tune throughput.
+
+### Retriever options (`--retriever-option key=value`)
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `limit` | int | 100 | Page size for each paginated Cypher query (`SKIP $offset LIMIT $limit`). Larger values mean fewer round-trips. |
+| `shard_size` | int | — | When set, each relationship type is split into shards of this size and fetched concurrently. Requires a key field or falls back to `elementId`. |
+| `sample_ratio` | int | — | Only copy records where `toInteger(split(elementId(r), ':')[-1]) % sample_ratio = 0`. A deterministic, reproducible subset. `1` is treated as disabled. |
+| `latest_hours` | int | — | Only copy records where `last_ingested_at >= now() - latest_hours`. Useful for incremental copies. |
+| `relationships_only` | bool | false | Skip node fetching entirely; only copy relationships. |
+
+### Connector options (`--connector-option key=value`)
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `chunk_size` | int | target default | Number of records per Cypher write batch inside each flush lane. |
+| `execute_chunks_in_parallel` | bool | false | Run write chunks concurrently within each flush lane. |
+| `retries_per_chunk` | int | 0 | Number of times to retry a failed write chunk before raising. |
+
+### Best-known configuration (relationships, 24 h incremental)
+
+Benchmark result: **~27 min, ~776 relationships/s peak** for a production graph with ~1.27 M relationships (2026-06-24, `sample_ratio=100`).
+
+```bash
+nodestream copy \
+  --from <source> \
+  --to <destination> \
+  --all \
+  --retriever-option relationships_only=true \
+  --retriever-option latest_hours=24 \
+  --retriever-option shard_size=10000 \
+  --concurrency-limit 20 \
+  --flush-concurrency 8 \
+  --batch-size 100000 \
+  --step-outbox-size 2000000 \
+  --reporting-frequency 30 \
+  --connector-option execute_chunks_in_parallel=true \
+  --connector-option chunk_size=10000 \
+  --connector-option retries_per_chunk=5 \
+  --metrics-interval-in-seconds 30 \
+  --json
+```
+
+**Why these values:**
+- `shard_size=10000` — splits large relationship types into independent coroutines, filling all concurrency slots.
+- `concurrency-limit=20` — higher values (e.g. 30–40) cause SessionExpired/network errors on the destination; 20 gives 0–50 errors vs. 200+ at 30.
+- `flush-concurrency=8` — 8 parallel write lanes; saturates destination write throughput without overloading connections.
+- `batch-size=100000` — larger batches amortise per-batch overhead; peak throughput higher than 50K batches.
+- `step-outbox-size=2000000` — large buffer so the extractor is never blocked waiting for the writer to drain.
+- `relationships_only=true` + `latest_hours=24` — incremental mode; nodes are stable, only new/changed relationships need copying.
+
+## Concepts
+
+### Migrations
 
 The plugin supports migrations. Migrations are used to create indexes and constraints on the database. 
 

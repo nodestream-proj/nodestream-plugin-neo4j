@@ -25,6 +25,7 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
         chunk_size: int = 1000,
         execute_chunks_in_parallel: bool = True,
         retries_per_chunk: int = 3,
+        transaction_batch_size: int = 10000,
         _experimental_set_first_ingested_at: bool = False,
         **connection_args,
     ):
@@ -38,6 +39,7 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
             chunk_size=chunk_size,
             execute_chunks_in_parallel=execute_chunks_in_parallel,
             retries_per_chunk=retries_per_chunk,
+            transaction_batch_size=transaction_batch_size,
             set_first_ingested_at=_experimental_set_first_ingested_at,
         )
 
@@ -73,15 +75,25 @@ class Neo4jDatabaseConnector(DatabaseConnector, alias="neo4j"):
             retries_per_chunk=self.retries_per_chunk,
         )
 
-    def make_type_retriever(self, **kwargs) -> TypeRetriever:
-        limit: int = kwargs.pop("limit", 1000)
-        sample_ratio: int | None = kwargs.pop("sample_ratio", None)
-        latest_hours: int | None = kwargs.pop("latest_hours", None)
+    def make_type_retriever(
+        self,
+        schema,
+        shard_size: int = 10000,
+        sample_ratio: int | None = None,
+        latest_hours: int | None = None,
+        preload_nodes: bool = False,
+        relationships_only: bool = False,
+        distribution: str = "sequential",
+    ) -> TypeRetriever:
         return Neo4jTypeRetriever(
             self.database_connection,
-            limit,
+            schema,
+            shard_size,
             sample_ratio=sample_ratio,
             latest_hours=latest_hours,
+            preload_nodes=preload_nodes,
+            relationships_only=relationships_only,
+            distribution=distribution,
         )
 
     def make_migrator(self) -> Migrator:
