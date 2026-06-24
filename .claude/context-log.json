@@ -1,0 +1,380 @@
+[
+  {
+    "timestamp": "2026-04-28T20:41:50Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 27402,
+    "est_tokens": 3223,
+    "fill_pct": 1
+  },
+  {
+    "timestamp": "2026-04-28T20:43:40Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 83840,
+    "est_tokens": 9694,
+    "fill_pct": 4
+  },
+  {
+    "timestamp": "2026-04-28T20:46:11Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 96611,
+    "est_tokens": 11347,
+    "fill_pct": 5
+  },
+  {
+    "timestamp": "2026-04-28T20:52:27Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 147713,
+    "est_tokens": 18608,
+    "fill_pct": 9
+  },
+  {
+    "timestamp": "2026-04-28T20:55:41Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 152917,
+    "est_tokens": 19265,
+    "fill_pct": 9
+  },
+  {
+    "timestamp": "2026-04-28T21:07:41Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 690409,
+    "est_tokens": 63633,
+    "fill_pct": 31
+  },
+  {
+    "timestamp": "2026-04-28T21:13:01Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 695996,
+    "est_tokens": 64224,
+    "fill_pct": 32
+  },
+  {
+    "timestamp": "2026-04-28T21:15:26Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 700913,
+    "est_tokens": 64774,
+    "fill_pct": 32
+  },
+  {
+    "timestamp": "2026-04-28T21:16:22Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 722048,
+    "est_tokens": 67138,
+    "fill_pct": 33
+  },
+  {
+    "timestamp": "2026-04-28T21:19:34Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 726686,
+    "est_tokens": 67617,
+    "fill_pct": 33
+  },
+  {
+    "timestamp": "2026-04-28T23:41:31Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 758366,
+    "est_tokens": 72465,
+    "fill_pct": 36
+  },
+  {
+    "timestamp": "2026-04-28T23:43:56Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 849441,
+    "est_tokens": 77684,
+    "fill_pct": 38
+  },
+  {
+    "timestamp": "2026-04-28T23:59:36Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 1544886,
+    "est_tokens": 132504,
+    "fill_pct": 66
+  },
+  {
+    "timestamp": "2026-04-29T00:00:59Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 1552050,
+    "est_tokens": 133418,
+    "fill_pct": 66
+  },
+  {
+    "timestamp": "2026-04-29T00:02:33Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 1648393,
+    "est_tokens": 140162,
+    "fill_pct": 70
+  },
+  {
+    "timestamp": "2026-04-29T00:10:25Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 1791847,
+    "est_tokens": 153499,
+    "fill_pct": 76
+  },
+  {
+    "timestamp": "2026-04-29T00:12:09Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 1823845,
+    "est_tokens": 155434,
+    "fill_pct": 77
+  },
+  {
+    "timestamp": "2026-04-29T00:14:26Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 1854035,
+    "est_tokens": 158511,
+    "fill_pct": 79
+  },
+  {
+    "timestamp": "2026-04-29T00:18:41Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 2001201,
+    "est_tokens": 175324,
+    "fill_pct": 87
+  },
+  {
+    "timestamp": "2026-04-29T00:45:51Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 2490407,
+    "est_tokens": 221022,
+    "fill_pct": 110
+  },
+  {
+    "timestamp": "2026-04-29T01:32:04Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 2506442,
+    "est_tokens": 222914,
+    "fill_pct": 111
+  },
+  {
+    "timestamp": "2026-04-29T01:51:08Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 2512077,
+    "est_tokens": 223587,
+    "fill_pct": 111
+  },
+  {
+    "timestamp": "2026-05-06T00:00:14Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 2550987,
+    "est_tokens": 224628,
+    "fill_pct": 112
+  },
+  {
+    "timestamp": "2026-05-06T00:33:34Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-endpoint-graph-ingest/4e61fbc0-4079-450d-afec-685b98e361d6.jsonl",
+    "bytes": 36804162,
+    "est_tokens": 2864936,
+    "fill_pct": 1432
+  },
+  {
+    "timestamp": "2026-05-06T02:07:37Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 3399480,
+    "est_tokens": 235397,
+    "fill_pct": 117
+  },
+  {
+    "timestamp": "2026-05-06T02:11:44Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-notifications-service/f95c6a11-6f85-4748-83b4-8ae7ccc4fb16.jsonl",
+    "bytes": 55579465,
+    "est_tokens": 5019024,
+    "fill_pct": 2509
+  },
+  {
+    "timestamp": "2026-05-06T02:17:39Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 3509533,
+    "est_tokens": 249758,
+    "fill_pct": 124
+  },
+  {
+    "timestamp": "2026-05-06T02:58:59Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 3996714,
+    "est_tokens": 268571,
+    "fill_pct": 134
+  },
+  {
+    "timestamp": "2026-05-08T21:59:06Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 4320787,
+    "est_tokens": 297955,
+    "fill_pct": 148
+  },
+  {
+    "timestamp": "2026-05-13T02:03:21Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 7221767,
+    "est_tokens": 357904,
+    "fill_pct": 178
+  },
+  {
+    "timestamp": "2026-05-13T02:03:31Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 7227448,
+    "est_tokens": 358572,
+    "fill_pct": 179
+  },
+  {
+    "timestamp": "2026-05-13T19:44:24Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-alakazam/2f0da3d0-1c32-422f-b17f-6b2b6927faab.jsonl",
+    "bytes": 13815371,
+    "est_tokens": 925353,
+    "fill_pct": 462
+  },
+  {
+    "timestamp": "2026-05-13T21:04:58Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 7447877,
+    "est_tokens": 372269,
+    "fill_pct": 186
+  },
+  {
+    "timestamp": "2026-05-13T22:23:03Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 7567223,
+    "est_tokens": 373660,
+    "fill_pct": 186
+  },
+  {
+    "timestamp": "2026-05-13T22:36:31Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 8909936,
+    "est_tokens": 389769,
+    "fill_pct": 194
+  },
+  {
+    "timestamp": "2026-05-13T22:39:26Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 9025577,
+    "est_tokens": 391086,
+    "fill_pct": 195
+  },
+  {
+    "timestamp": "2026-05-13T22:39:51Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-endpoint-graph-ingest/4e61fbc0-4079-450d-afec-685b98e361d6.jsonl",
+    "bytes": 51575378,
+    "est_tokens": 3763874,
+    "fill_pct": 1881
+  },
+  {
+    "timestamp": "2026-05-13T22:45:03Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 9090472,
+    "est_tokens": 391907,
+    "fill_pct": 195
+  },
+  {
+    "timestamp": "2026-05-13T22:48:57Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 9311083,
+    "est_tokens": 393653,
+    "fill_pct": 196
+  },
+  {
+    "timestamp": "2026-05-13T23:41:46Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 9990826,
+    "est_tokens": 407324,
+    "fill_pct": 203
+  },
+  {
+    "timestamp": "2026-05-13T23:51:29Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 10346006,
+    "est_tokens": 413628,
+    "fill_pct": 206
+  },
+  {
+    "timestamp": "2026-05-13T23:52:45Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 10354490,
+    "est_tokens": 414463,
+    "fill_pct": 207
+  },
+  {
+    "timestamp": "2026-05-13T23:57:35Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 10765192,
+    "est_tokens": 426660,
+    "fill_pct": 213
+  },
+  {
+    "timestamp": "2026-05-13T23:59:29Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-endpoint-graph-ingest/4e61fbc0-4079-450d-afec-685b98e361d6.jsonl",
+    "bytes": 56460555,
+    "est_tokens": 3843021,
+    "fill_pct": 1921
+  },
+  {
+    "timestamp": "2026-05-14T00:03:04Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 10888994,
+    "est_tokens": 427838,
+    "fill_pct": 213
+  },
+  {
+    "timestamp": "2026-05-14T00:04:44Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 10965978,
+    "est_tokens": 432793,
+    "fill_pct": 216
+  },
+  {
+    "timestamp": "2026-05-14T00:20:22Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 12101769,
+    "est_tokens": 449205,
+    "fill_pct": 224
+  },
+  {
+    "timestamp": "2026-05-14T00:42:33Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 12263727,
+    "est_tokens": 450706,
+    "fill_pct": 225
+  },
+  {
+    "timestamp": "2026-05-14T22:22:15Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 12327352,
+    "est_tokens": 450957,
+    "fill_pct": 225
+  },
+  {
+    "timestamp": "2026-05-15T16:51:20Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 12637168,
+    "est_tokens": 453465,
+    "fill_pct": 226
+  },
+  {
+    "timestamp": "2026-05-15T20:04:09Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 12703886,
+    "est_tokens": 453653,
+    "fill_pct": 226
+  },
+  {
+    "timestamp": "2026-05-15T20:08:33Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 12823054,
+    "est_tokens": 456156,
+    "fill_pct": 228
+  },
+  {
+    "timestamp": "2026-05-15T20:12:05Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 12971797,
+    "est_tokens": 468173,
+    "fill_pct": 234
+  },
+  {
+    "timestamp": "2026-05-15T22:19:00Z",
+    "session_file": "/Users/asantos4/.claude/projects/-Users-asantos4-Documents-nodestream-plugin-neo4j/5dba5a13-7501-46ea-ab36-fa062c74cec7.jsonl",
+    "bytes": 13278425,
+    "est_tokens": 485408,
+    "fill_pct": 242
+  }
+]
